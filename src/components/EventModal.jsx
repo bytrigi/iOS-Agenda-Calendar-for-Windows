@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Trash2, Clock, AlignLeft, Bell, Calendar as CalendarIcon, ChevronDown, Check } from 'lucide-react';
+import { X, Trash2, Clock, AlignLeft, Bell, Calendar as CalendarIcon, ChevronDown, Check, Repeat } from 'lucide-react';
 
 import DatePicker, { registerLocale } from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -91,10 +91,20 @@ const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdi
   const [start, setStart] = useState(new Date());
   const [end, setEnd] = useState(new Date());
   const [allDay, setAllDay] = useState(false);
-  const [color, setColor] = useState('bg-blue-100');
+  const [color, setColor] = useState('#EA426A'); // Default Planmore Red/Pink
   const [description, setDescription] = useState('');
   const [reminder, setReminder] = useState(0);
+  const [recurrence, setRecurrence] = useState('NONE'); // Nuevo estado para recurrencia
+  const [recurrenceEnd, setRecurrenceEnd] = useState(null); // Fecha fin recurrencia
   const [selectedCalendarUrl, setSelectedCalendarUrl] = useState('');
+
+  const recurrenceOptions = [
+      { value: 'NONE', label: 'No repetir' },
+      { value: 'DAILY', label: 'Todos los días' },
+      { value: 'WEEKLY', label: 'Todas las semanas' },
+      { value: 'MONTHLY', label: 'Todos los meses' },
+      { value: 'YEARLY', label: 'Todos los años' }
+  ];
 
   const reminderOptions = [
       { value: 0, label: 'Sin recordatorio' },
@@ -111,9 +121,12 @@ const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdi
   ];
 
   const colors = [
-    'bg-blue-100', 'bg-red-100', 'bg-green-100', 
-    'bg-yellow-100', 'bg-purple-100', 'bg-orange-100'
+    '#EA426A', '#FFCC00', '#FF7D40', '#308014', '#4FACF2', 
+    '#3D59AB', '#C07ADB', '#9D8563', '#FF0000', '#E3CF57', 
+    '#802A2A', '#00C957', '#33A1C9', '#6A5ACD', '#A020F0'
   ];
+  
+  const colorInputRef = useRef(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -122,9 +135,11 @@ const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdi
         setStart(new Date(eventToEdit.start));
         setEnd(new Date(eventToEdit.end));
         setAllDay(eventToEdit.allDay || false);
-        setColor(eventToEdit.color || 'bg-blue-100');
+        setColor(eventToEdit.color || '#EA426A');
         setDescription(eventToEdit.description || '');
         setReminder(eventToEdit.reminder || 0);
+        setRecurrence(eventToEdit.recurrence || 'NONE');
+        setRecurrenceEnd(eventToEdit.recurrenceEnd ? new Date(eventToEdit.recurrenceEnd) : null);
         setSelectedCalendarUrl(eventToEdit.calendarUrl || (calendars?.[0]?.url) || '');
       } else {
         setTitle('');
@@ -138,9 +153,13 @@ const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdi
         setStart(startD);
         setEnd(endD);
         setAllDay(false);
-        setColor('bg-blue-100');
+        setColor('#EA426A');
+        setDescription('');
+        setDescription('');
         setDescription('');
         setReminder(0);
+        setRecurrence('NONE');
+        setRecurrenceEnd(null);
         // Default select first available calendar if exists
         setSelectedCalendarUrl(calendars?.[0]?.url || '');
       }
@@ -159,6 +178,8 @@ const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdi
       color,
       description,
       reminder: parseInt(reminder),
+      recurrence,
+      recurrenceEnd: recurrenceEnd ? recurrenceEnd.toISOString() : null,
       calendarUrl: selectedCalendarUrl
     });
   };
@@ -340,6 +361,47 @@ const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdi
 
           {/* RECORDATORIO */}
 
+          {/* REPETIR */}
+          <div className="flex gap-2">
+            <div className="flex-1">
+                 <CustomSelect 
+                    value={recurrence} 
+                    options={recurrenceOptions} 
+                    onChange={(val) => setRecurrence(val)}
+                    icon={Repeat}
+                 />
+            </div>
+            
+            {/* HASTA CUANDO (Solo si hay recurrencia) */}
+            {recurrence !== 'NONE' && (
+                <div className="flex-1">
+                     <DatePicker 
+                        selected={recurrenceEnd} 
+                        onChange={(date) => setRecurrenceEnd(date)} 
+                        dateFormat="dd/MM/yyyy"
+                        locale="es"
+                        placeholderText="Nunca (Infinito)"
+                        isClearable
+                        customInput={
+                            <button className="w-full bg-white border border-gray-200 rounded-xl p-2.5 text-sm flex items-center justify-between hover:border-blue-300 focus:ring-2 focus:ring-blue-50/50 outline-none h-[42px]">
+                                <span className={`font-medium truncate ${recurrenceEnd ? 'text-gray-700' : 'text-gray-400'}`}>
+                                    {recurrenceEnd ? `Hasta ${recurrenceEnd.toLocaleDateString()}` : 'Nunca'}
+                                </span>
+                                {recurrenceEnd ? (
+                                    <X size={14} className="text-gray-400 hover:text-red-500" onClick={(e) => { e.stopPropagation(); setRecurrenceEnd(null); }} />
+                                ) : (
+                                    <ChevronDown size={14} className="text-gray-400" />
+                                )}
+                            </button>
+                        }
+                        portalId="root"
+                        popperClassName="z-[9999]"
+                        popperPlacement="top-end"
+                     />
+                </div>
+            )}
+          </div>
+
           {/* RECORDATORIO */}
           <div className="w-full">
              <CustomSelect 
@@ -353,7 +415,7 @@ const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdi
           {/* Categoría */}
           <div>
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Categoría</p>
-            <div className="flex gap-2 overflow-x-auto no-scrollbar p-1 -ml-1">
+            <div className="flex flex-wrap gap-2 p-1 -ml-1">
                 {colors.map(c => (
                     <button
                         key={c}
@@ -361,11 +423,36 @@ const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdi
                         className={`
                             w-5 h-5 rounded-full transition-all flex-shrink-0 
                             hover:scale-110 hover:shadow-sm cursor-pointer
-                            ${c} 
                             ${color === c ? 'ring-2 ring-offset-1 ring-gray-300 shadow-sm scale-110' : ''}
                         `}
+                        style={{ backgroundColor: c }}
+                        title={c}
                     />
                 ))}
+                
+                {/* Custom Color Picker Button */}
+                <div className="relative">
+                    <button
+                        onClick={() => colorInputRef.current?.click()}
+                        className={`
+                            w-5 h-5 rounded-full transition-all flex-shrink-0 
+                            hover:scale-110 hover:shadow-sm cursor-pointer border border-gray-200
+                            flex items-center justify-center bg-white text-gray-400
+                            ${!colors.includes(color) ? 'ring-2 ring-offset-1 ring-gray-300 shadow-sm scale-110' : ''}
+                        `}
+                        title="Color personalizado"
+                        style={!colors.includes(color) ? { backgroundColor: color } : {}}
+                    >
+                        {!colors.includes(color) ? '' : '+'}
+                    </button>
+                    <input
+                        ref={colorInputRef}
+                        type="color"
+                        className="absolute inset-0 opacity-0 w-0 h-0"
+                        onChange={(e) => setColor(e.target.value)}
+                        value={color}
+                    />
+                </div>
             </div>
           </div>
 

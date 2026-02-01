@@ -10,6 +10,32 @@ const WeekView = ({ date, events = [], onEventClick }) => {
     // Altura por hora (80px = h-20)
     const HOUR_HEIGHT = 80;
 
+    const hexToRgba = (hex, alpha) => {
+        if (!hex) return `rgba(79, 172, 242, ${alpha})`;
+        let c;
+        if (/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)) {
+            c = hex.substring(1).split('');
+            if (c.length === 3) {
+                c = [c[0], c[0], c[1], c[1], c[2], c[2]];
+            }
+            c = '0x' + c.join('');
+            return 'rgba(' + [(c >> 16) & 255, (c >> 8) & 255, c & 255].join(',') + ',' + alpha + ')';
+        }
+        return hex;
+    };
+
+    const resolveColor = (color) => {
+        if (!color) return '#4FACF2';
+        if (color.startsWith('#')) return color;
+        if (color.includes('blue')) return '#4FACF2';
+        if (color.includes('red')) return '#EA426A';
+        if (color.includes('green')) return '#308014';
+        if (color.includes('yellow')) return '#FFCC00';
+        if (color.includes('purple')) return '#A020F0';
+        if (color.includes('orange')) return '#FF7D40';
+        return '#4FACF2';
+    };
+
     // Calcular posición del evento
     const getEventStyle = (event) => {
         const start = new Date(event.start);
@@ -98,9 +124,22 @@ const WeekView = ({ date, events = [], onEventClick }) => {
                                     className={`
                                         relative z-10 rounded-md px-2 py-1 text-[10px] font-bold truncate shadow-sm 
                                         hover:brightness-95 transition-all text-left
-                                        ${event.color} text-gray-700
+                                        text-white
                                     `}
-                                    style={{ gridColumn: `${colStart} / span ${span}` }}
+                                    style={{ 
+                                        gridColumn: `${colStart} / span ${span}`,
+                                        backgroundColor: (() => {
+                                            const c = event.color || '#4FACF2';
+                                            if (c.startsWith('#')) return c;
+                                            if (c.includes('blue')) return '#4FACF2';
+                                            if (c.includes('red')) return '#EA426A';
+                                            if (c.includes('green')) return '#308014';
+                                            if (c.includes('yellow')) return '#FFCC00';
+                                            if (c.includes('purple')) return '#A020F0';
+                                            if (c.includes('orange')) return '#FF7D40';
+                                            return '#4FACF2';
+                                        })()
+                                    }}
                                     title={event.title}
                                 >
                                     {event.title}
@@ -164,8 +203,11 @@ const WeekView = ({ date, events = [], onEventClick }) => {
                                         return (
                                         <div
                                             key={event.id}
-                                            className={`absolute rounded-md border-l-2 px-1 text-[10px] shadow-sm cursor-pointer hover:brightness-95 transition-all overflow-hidden ${event.color} opacity-90`}
+                                            className={`absolute rounded-lg border-l-4 px-1 text-[10px] shadow-sm cursor-pointer hover:brightness-95 transition-all overflow-hidden flex flex-col justify-center animate-popIn`}
                                             style={{
+                                                backgroundColor: hexToRgba(resolveColor(event.color), 0.2),
+                                                borderLeftColor: resolveColor(event.color),
+                                                color: resolveColor(event.color),
                                                 top: `${startMinutes * (HOUR_HEIGHT / 60)}px`,
                                                 height: `${duration * (HOUR_HEIGHT / 60)}px`,
                                                 left: '2px',
@@ -176,8 +218,8 @@ const WeekView = ({ date, events = [], onEventClick }) => {
                                                 if (onEventClick) onEventClick(event); 
                                             }}
                                         >
-                                            <div className="font-bold truncate leading-tight">{event.title}</div>
-                                            <div className="truncate opacity-80 scale-90 origin-top-left">
+                                            <div className="font-bold truncate leading-tight" style={{ color: resolveColor(event.color), filter: 'brightness(0.7)' }}>{event.title}</div>
+                                            <div className="truncate opacity-80 scale-90 origin-top-left" style={{ color: resolveColor(event.color), filter: 'brightness(0.7)' }}>
                                                 {format(new Date(event.start), 'HH:mm')}
                                             </div>
                                         </div>

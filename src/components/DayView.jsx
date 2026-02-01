@@ -147,6 +147,32 @@ const DayView = ({ date, events, onEventClick }) => {
         };
     };
 
+    const hexToRgba = (hex, alpha) => {
+        if (!hex) return `rgba(79, 172, 242, ${alpha})`;
+        let c;
+        if (/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)) {
+            c = hex.substring(1).split('');
+            if (c.length === 3) {
+                c = [c[0], c[0], c[1], c[1], c[2], c[2]];
+            }
+            c = '0x' + c.join('');
+            return 'rgba(' + [(c >> 16) & 255, (c >> 8) & 255, c & 255].join(',') + ',' + alpha + ')';
+        }
+        return hex;
+    };
+
+    const getEventColor = (color) => {
+        if (!color) return '#4FACF2';
+        if (color.startsWith('#')) return color;
+        if (color.includes('blue')) return '#4FACF2';
+        if (color.includes('red')) return '#EA426A';
+        if (color.includes('green')) return '#308014';
+        if (color.includes('yellow')) return '#FFCC00';
+        if (color.includes('purple')) return '#A020F0';
+        if (color.includes('orange')) return '#FF7D40';
+        return '#4FACF2';
+    };
+
     // COMPROBACIÓN: ¿Es hoy?
     const isToday = isSameDay(date, new Date());
 
@@ -171,7 +197,7 @@ const DayView = ({ date, events, onEventClick }) => {
                     <div className="flex items-end gap-6">
                         <div className="text-right">
                             <span className="text-4xl font-bold text-gray-800 block leading-none">
-                                {dayEvents.length}
+                                {dayEvents.length + allDayEvents.length}
                             </span>
                             <span className="text-xs text-gray-400 uppercase tracking-widest font-bold">Eventos</span>
                         </div>
@@ -192,7 +218,8 @@ const DayView = ({ date, events, onEventClick }) => {
                             <button
                                 key={event.id}
                                 onClick={(e) => { e.stopPropagation(); onEventClick(event); }}
-                                className={`px-3 py-1 rounded-md text-xs font-bold shadow-sm border-l-4 border-black/10 hover:brightness-95 transition-transform hover:scale-105 ${event.color} text-gray-700`}
+                                className={`px-3 py-1 rounded-md text-xs font-bold shadow-sm border-l-4 border-black/10 hover:brightness-95 transition-transform hover:scale-105 text-white`}
+                                style={{ backgroundColor: getEventColor(event.color) }}
                             >
                                 {event.title}
                             </button>
@@ -232,12 +259,15 @@ const DayView = ({ date, events, onEventClick }) => {
                                 top: `${(startMinutes / 60) * 80}px`,
                                 height: `${(durationMinutes / 60) * 80}px`,
                                 left: '60px',
-                                right: '10px'
+                                right: '10px',
+                                backgroundColor: hexToRgba(getEventColor(event.color), 0.15),
+                                borderLeftColor: getEventColor(event.color),
+                                color: getEventColor(event.color),
                             }}
-                            className={`absolute rounded-lg p-3 cursor-pointer shadow-sm hover:shadow-md transition-all border-l-4 ${event.color} bg-opacity-50 hover:brightness-95 border-opacity-100 overflow-hidden flex flex-col justify-center animate-popIn`}
+                            className={`absolute rounded-lg p-3 cursor-pointer shadow-sm hover:shadow-md transition-all border-l-4 hover:brightness-95 overflow-hidden flex flex-col justify-center animate-popIn`}
                         >
-                            <div className="font-bold text-gray-800 text-sm leading-tight line-clamp-1">{event.title}</div>
-                            <div className="text-xs text-gray-600 opacity-80 mt-1 font-medium">
+                            <div className="font-bold text-sm leading-tight line-clamp-1" style={{ color: getEventColor(event.color), filter: 'brightness(0.7)' }}>{event.title}</div>
+                            <div className="text-xs opacity-80 mt-1 font-medium" style={{ color: getEventColor(event.color), filter: 'brightness(0.7)' }}>
                                 {format(new Date(event.start), 'HH:mm')} - {format(new Date(event.end), 'HH:mm')}
                             </div>
                         </div>

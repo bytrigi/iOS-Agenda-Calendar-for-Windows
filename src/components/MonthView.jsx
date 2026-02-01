@@ -15,6 +15,33 @@ const MonthView = ({ date, onDayClick, onEventClick, events = [] }) => {
     const weeks = eachWeekOfInterval({ start: calendarStart, end: calendarEnd }, { weekStartsOn: 1 });
     const weekDaysNames = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'];
 
+    // Helper para transparencia
+    const hexToRgba = (hex, alpha) => {
+        if (!hex) return `rgba(79, 172, 242, ${alpha})`;
+        let c;
+        if (/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)) {
+            c = hex.substring(1).split('');
+            if (c.length === 3) {
+                c = [c[0], c[0], c[1], c[1], c[2], c[2]];
+            }
+            c = '0x' + c.join('');
+            return 'rgba(' + [(c >> 16) & 255, (c >> 8) & 255, c & 255].join(',') + ',' + alpha + ')';
+        }
+        return hex;
+    };
+
+    const resolveColor = (color) => {
+        if (!color) return '#4FACF2';
+        if (color.startsWith('#')) return color;
+        if (color.includes('blue')) return '#4FACF2';
+        if (color.includes('red')) return '#EA426A';
+        if (color.includes('green')) return '#308014';
+        if (color.includes('yellow')) return '#FFCC00';
+        if (color.includes('purple')) return '#A020F0';
+        if (color.includes('orange')) return '#FF7D40';
+        return '#4FACF2';
+    };
+
     return (
         <div className="flex flex-col h-full bg-white/60 p-4 overflow-hidden font-sans">
              <h2 className="text-3xl font-serif font-bold text-gray-800 mb-4 capitalize pl-2">
@@ -142,11 +169,18 @@ const MonthView = ({ date, onDayClick, onEventClick, events = [] }) => {
                                                 height: '18px',
                                                 position: 'absolute',
                                                 left: '2px',
-                                                right: '2px'
+                                                right: '2px',
+                                                backgroundColor: (() => {
+                                                    const baseColor = resolveColor(item.event.color);
+                                                    if (item.event.allDay) return baseColor; // Solid for All Day
+                                                    return hexToRgba(baseColor, 0.15); // Transparent for Timed
+                                                })(),
+                                                borderLeft: !item.event.allDay ? `3px solid ${resolveColor(item.event.color)}` : 'none',
+                                                color: !item.event.allDay ? resolveColor(item.event.color) : 'white'
                                             }}
                                             className={`
                                                 text-[10px] px-1.5 rounded-sm font-bold shadow-sm pointer-events-auto cursor-pointer flex items-center
-                                                ${item.event.color} text-gray-700 hover:brightness-95 transition-transform hover:scale-[1.01]
+                                                hover:brightness-95 transition-transform hover:scale-[1.01]
                                                 truncate leading-none
                                             `}
                                             title={item.event.title}

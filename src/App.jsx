@@ -27,6 +27,7 @@ function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [showDeleteOptions, setShowDeleteOptions] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
@@ -122,25 +123,44 @@ function App() {
                 if (eventData.id && eventData.source === 'icloud') {
                     // ACTUALIZAR (UPDATE)
                     // Usamos updateEvent que hace PUT directo (sin If-None-Match)
-                    await service.updateEvent(targetCalendarUrl, { ...eventData });
+                    const updatedCloudEvent = await service.updateEvent(targetCalendarUrl, { ...eventData });
                     console.log('Evento actualizado en iCloud:', eventData.id);
                     source = 'icloud';
-                    // Mantener ID original
+                    // Mantener ID original pero actualizar descripción si cambió (inyección de tag)
                     finalId = eventData.id;
+                    eventData.description = updatedCloudEvent.description; 
                 } else {
                     // CREAR (NEW)
                     const cloudEvent = await service.createEvent(targetCalendarUrl, { ...eventData, id: finalId });
                     console.log('Evento creado en iCloud:', cloudEvent);
                     finalId = cloudEvent.id; 
                     source = 'icloud';
+                    eventData.description = cloudEvent.description;
                 }
 
             } catch (cloudError) {
-                console.error('Error sincronizando con iCloud:', cloudError);
-                // Si falla actualización por 412/404, quizá deberíamos intentar crear? 
-                // Por ahora, fallback a local y alerta.
-                alert('Error al sincronizar con iCloud. Se guardará localmente.\n' + cloudError.message);
-                source = 'local'; 
+                // FALLBACK SMART: Si falla con 412 (Precondition Failed), significa que el evento YA EXISTE en iCloud.
+                // Esto pasa si localmente no teniamos 'source: icloud' pero el UID ya estaba pillado.
+                // Intentamos hacer UPDATE en vez de CREATE.
+                if (cloudError.message && cloudError.message.includes('412')) {
+                   try {
+                       console.log('Detectado error 412 (Ya existe). Intentando UPDATE...');
+                       const service = new ICloudService(iCloudConfig.email, iCloudConfig.password); // Re-instanciar
+                       const targetCalendarUrl = eventData.calendarUrl || iCloudConfig.defaultCalendarUrl;
+                       const updatedFallback = await service.updateEvent(targetCalendarUrl, { ...eventData, id: finalId });
+                       console.log('Evento recuperado y actualizado en iCloud via Fallback.');
+                       source = 'icloud';
+                       eventData.description = updatedFallback.description;
+                   } catch (updateError) {
+                       console.error('Fallo el fallback de update:', updateError);
+                       alert('Error al sincronizar con iCloud (incluso al intentar actualizar).\n' + updateError.message);
+                       source = 'local';
+                   }
+                } else {
+                    console.error('Error sincronizando con iCloud:', cloudError);
+                    alert('Error al sincronizar con iCloud. Se guardará localmente.\n' + cloudError.message);
+                    source = 'local';
+                } 
             }
         }
 
@@ -155,7 +175,10 @@ function App() {
             type: 'event',
             source: source,
             id: finalId,
-            calendarUrl: eventData.calendarUrl || iCloudConfig?.defaultCalendarUrl // Guardar a qué calendario pertenece
+            calendarUrl: eventData.calendarUrl || iCloudConfig?.defaultCalendarUrl, // Guardar a qué calendario pertenece
+            lastUpdated: Date.now(), // DEBOUNCE MARKER: Marca de tiempo local para evitar sobrescritura por sync lag
+            recurrence: eventData.recurrence,
+            recurrenceEnd: eventData.recurrenceEnd
         };
 
         if (eventData.id) {
@@ -173,10 +196,100 @@ function App() {
 
 
 
-  const handleRequestDelete = () => { setIsModalOpen(false); setIsConfirmOpen(true); };
-  const executeDeleteEvent = async () => {
+  const requestDelete = () => {
+       console.log('[DEBUG DELETE] Requesting delete for:', selectedEvent);
+       console.log('[DEBUG DELETE] isRecurring check:', {
+           recurrence: selectedEvent.recurrence,
+           originalId: selectedEvent.originalId,
+           recurrenceId: selectedEvent.recurrenceId,
+           hasRecurrence: !!(selectedEvent.recurrence && selectedEvent.recurrence !== 'NONE'),
+           hasOriginalId: !!selectedEvent.originalId,
+           hasRecurrenceId: !!selectedEvent.recurrenceId
+       });
+
+       const isRecurringLike = (selectedEvent.recurrence && selectedEvent.recurrence !== 'NONE') || selectedEvent.originalId || selectedEvent.recurrenceId;
+       setShowDeleteOptions(!!isRecurringLike);
+       setIsModalOpen(false);
+       setIsConfirmOpen(true);
+  };
+
+  const executeDeleteEvent = async (scope = 'ALL') => {
+      // Scope: ALL (Default/Legacy), SINGLE, FUTURE
       if (selectedEvent && selectedEvent.id) {
-          await db.events.delete(selectedEvent.id);
+          
+          let actionCompleted = false;
+
+          // 1. Manejo iCloud (si aplica)
+          if (iCloudConfig && selectedEvent.source === 'icloud') {
+              try {
+                  const service = new ICloudService(iCloudConfig.email, iCloudConfig.password);
+                  const targetUrl = selectedEvent.calendarUrl || iCloudConfig.defaultCalendarUrl;
+                  
+                  // CASO 1: Borrar Solo Esta Instancia
+                  if (scope === 'SINGLE' && selectedEvent.originalId) {
+                      await service.excludeInstance(targetUrl, selectedEvent.originalId, selectedEvent.start);
+                      actionCompleted = true;
+                  } 
+                  // CASO 2: Borrar Esta y Futuras
+                  else if (scope === 'FUTURE' && selectedEvent.originalId) {
+                       // Fecha límite = El día de AYER (para cortar antes de hoy)
+                       const cutOffDate = new Date(selectedEvent.start);
+                       cutOffDate.setDate(cutOffDate.getDate() - 1);
+                       await service.truncateSeries(targetUrl, selectedEvent.originalId, cutOffDate);
+                       actionCompleted = true;
+                  }
+                  // CASO 3: Borrar Todo (Default)
+                  else {
+                       // Si es instancia, borrar el Master? O si es Master?
+                       // Si scope es ALL, borramos por ID.
+                       const idToDelete = selectedEvent.originalId || selectedEvent.id;
+                       await service.deleteEvent(targetUrl, idToDelete);
+                       actionCompleted = true;
+                  }
+                  
+                  console.log(`Evento borrado de iCloud (Scope: ${scope})`);
+              } catch (e) {
+                  console.error("Error borrando de iCloud:", e);
+                  alert("No se pudo borrar de iCloud. " + e.message);
+                  return; // Stop if cloud failed? Or continue local? Let's continue local.
+              }
+          }
+
+          // 2. Borrar LOCALMENTE
+          if (scope === 'SINGLE') {
+              // Borrar solo este registro
+              await db.events.delete(selectedEvent.id);
+          } else if (scope === 'FUTURE') {
+              // Borrar este y todos los que tengan mismo originalId y start >= este start
+              const startIso = new Date(selectedEvent.start).toISOString();
+              // Buscar futuros
+              const related = await db.events.where('originalId').equals(selectedEvent.originalId || selectedEvent.id).toArray();
+              const toDelete = related.filter(e => e.start >= startIso).map(e => e.id);
+              // Tambien borrar el propio evento si no lo pillo el query
+              if (!toDelete.includes(selectedEvent.id)) toDelete.push(selectedEvent.id);
+              
+              await db.events.bulkDelete(toDelete);
+          } else {
+              // ALL: Borrar por ID. Y si es Master, borrar sus instancias?
+              if (selectedEvent.originalId) {
+                 // Es una instancia. Si borramos ALL, ¿queremos borrar la serie entera? 
+                 // Si el usuario eligió "Default" (o no salio opcion), asumimos borrar este item?
+                 // NO, si el usuario dice "Borrar" en instancia, debería salir el popup options.
+                 // Si sale ALL aqui, es que borro todo.
+                 // Borrar Master + Todas Instancias
+                 const masterId = selectedEvent.originalId;
+                 await db.events.delete(masterId); // Borrar Master si existe
+                 const instances = await db.events.where('originalId').equals(masterId).primaryKeys();
+                 await db.events.bulkDelete(instances);
+              } else {
+                 // Es normal o master
+                 await db.events.delete(selectedEvent.id);
+                 // Y sus instancias si las hubiera
+                 const instances = await db.events.where('originalId').equals(selectedEvent.id).primaryKeys();
+                 if (instances.length > 0) await db.events.bulkDelete(instances);
+              }
+          }
+
           setIsConfirmOpen(false);
           setIsModalOpen(false);
           setSelectedEvent(null);
@@ -281,12 +394,17 @@ function App() {
                     start: evt.start,
                     end: evt.end,
                     allDay: evt.allDay || false,
-                    color: cal.color || 'bg-blue-100', // Podríamos guardar color en el calendario
+                    color: evt.color || cal.color || '#4FACF2', // Usar color parseado de iCloud (hex)
                     description: evt.description || '',
                     source: 'icloud',
                     calendarName: cal.name, // Importante para la UI
                     calendarUrl: cal.url,   // Importante para edits
-                    type: 'event'
+                    type: 'event',
+                    // Fields for Recurring Events / Smart Delete
+                    originalId: evt.originalId, 
+                    recurrence: evt.recurrence,
+                    recurrenceEnd: evt.recurrenceEnd,
+                    recurrenceId: evt.recurrenceId
                 }));
                 totalEvents = [...totalEvents, ...mapped];
             } catch (err) {
@@ -295,22 +413,74 @@ function App() {
         }
 
         // 4. Mapear y guardar en Dexie
-        // NOTA: Deberíamos borrar los eventos antiguos de iCloud antes de insertar los nuevos para evitar zombies si se borraron en la nube.
-        // Estrategia simple: Borrar todos los de source='icloud' y reinsertar.
+        // FIX: Race Condition. Verificar timestamps locales para de-bouncing (20s cooldown).
         if (totalEvents.length > 0) {
-            // Borrado masivo de icloud events antiguo (opcional pero recomendado para sync limpia)
-            // await db.events.where('source').equals('icloud').delete(); // Dexie req compound index or manual filter logic
-            // Para MVP, solo hacemos put (update/insert). Si se borró en nube, aquí seguirá existiendo (known issue).
-            // Fix robusto: Traer todos IDs locales de iCloud, comparar con nuevos, borrar sobrantes.
             
-            // Implementación simple de limpieza:
-            const existingICloudKeys = await db.events.where('source').equals('icloud').primaryKeys();
-            const newIds = new Set(totalEvents.map(e => e.id));
-            const toDelete = existingICloudKeys.filter(k => !newIds.has(k));
+            // 4a. Traer eventos locales que coincidan con los IDs entrantes
+            const incomingIds = totalEvents.map(e => e.id);
+            const localEvents = await db.events.where('id').anyOf(incomingIds).toArray();
+            const localMap = new Map(localEvents.map(e => [e.id, e]));
             
-            if (toDelete.length > 0) await db.events.bulkDelete(toDelete);
+            const now = Date.now();
+
+            // 4b. Filtrar eventos de la nube que sean "viejos" (si local fue editado reciéntemente)
+                const validEventsToSave = totalEvents.filter(cloudEvent => {
+                 const local = localMap.get(cloudEvent.id);
+                 // Si fue editado localmente en los últimos 60 segundos, IGNORAR update de la nube (trusted local)
+                 if (local && local.lastUpdated && (now - local.lastUpdated < 60000)) {
+                     console.log(`Skipping overwrite for event ${cloudEvent.title} due to recent local edit.`);
+                     return false;
+                 }
+                 return true;
+            });
+
+            // 4c. Borrar obsoletos (que ya no están en la nube) + Borrar MASTERS locales si llegan INSTANCIAS
+            // Estrategia: Si llega un evento con originalId='X', y tenemos localmente un evento con id='X',
+            // significa que tenemos el "Master" local y han llegado las "Instancias". Borramos el Master.
+            const incomingOriginalIds = new Set(totalEvents.map(e => e.originalId).filter(id => id));
             
-            await db.events.bulkPut(totalEvents);
+            const existingICloudEvents = await db.events.where('source').equals('icloud').toArray();
+            const newIdsSet = new Set(totalEvents.map(e => e.id));
+            
+            const toDeleteIds = existingICloudEvents
+                .filter(localEvt => {
+                    // 1. Si está en la lista nueva (por ID exacto), MANTENER.
+                    if (newIdsSet.has(localEvt.id)) return false;
+
+                    // 2. Si es un MASTER y acaban de llegar sus INSTANCIAS, BORRAR.
+                    // (El Master local tiene id=UID, las instancias tienen originalId=UID)
+                    if (incomingOriginalIds.has(localEvt.id)) {
+                        console.log(`Deleting local Master ${localEvt.title} because instances arrived.`);
+                        return true;
+                    }
+                    
+                    // 3. Protección de Lag: Si NO está en la lista nueva, verificar si es "nuevo localmente"
+                    if (localEvt.lastUpdated && (now - localEvt.lastUpdated < 60000)) {
+                        console.log(`Preventing deletion of recently updated event ${localEvt.title} (Sync Lag Protection)`);
+                        return false; 
+                    }
+                    
+                    // 4. Si es viejo y no está en la nube, borrar.
+                    return true;
+                })
+                .map(e => e.id);
+            
+            if (toDeleteIds.length > 0) {
+                console.log("Borrando eventos obsoletos de iCloud:", toDeleteIds);
+                await db.events.bulkDelete(toDeleteIds);
+            }
+            
+            if (validEventsToSave.length > 0) {
+                 // DEBUG: Inspect what we are saving to see if color is correct
+                 validEventsToSave.forEach(e => {
+                     if (e.color && e.color.startsWith('#')) {
+                         console.log(`[DEBUG SAVE] Saving event ${e.title} with color: ${e.color}`);
+                     } else {
+                         console.log(`[DEBUG SAVE] Saving event ${e.title} with NO/DEFAULT color: ${e.color}`);
+                     }
+                 });
+                 await db.events.bulkPut(validEventsToSave);
+            }
         } else {
              // Si no hay eventos, borrar todos los de iCloud locales?
              // const count = await db.events.where('source').equals('icloud').count();
@@ -337,10 +507,10 @@ function App() {
   useEffect(() => {
       if (!iCloudConfig) return; 
 
-      // Función de sync segura con Cooldown de 10 segundos
+      // Función de sync segura con Cooldown de 5 segundos
       const runSmartSync = async (reason) => {
           const now = Date.now();
-          if (now - lastSyncTimeRef.current < 10000) {
+          if (now - lastSyncTimeRef.current < 5000) {
               // Skip if synced recently
               return;
           }
@@ -352,10 +522,10 @@ function App() {
           }
       };
 
-      // 1. Loop regular (más rápido: 30s)
+      // 1. Loop regular (más rápido: 10s)
       const intervalId = setInterval(() => {
           runSmartSync('interval');
-      }, 30000); 
+      }, 10000); 
 
       // 2. Sync al volver a la ventana (UX mágica "siempre actualizado")
       const handleFocus = () => {
@@ -508,12 +678,19 @@ function App() {
             isOpen={isModalOpen} 
             onClose={() => setIsModalOpen(false)} 
             onSave={handleSaveEvent} 
-            onDelete={handleRequestDelete} 
+            onDelete={requestDelete} 
             defaultDate={currentDate} 
             eventToEdit={selectedEvent} 
             calendars={iCloudConfig?.enabledCalendars || []}
         />
-        <ConfirmModal isOpen={isConfirmOpen} onClose={() => setIsConfirmOpen(false)} onConfirm={executeDeleteEvent} title="¿Borrar evento?" message="Este evento se eliminará permanentemente." />
+        <ConfirmModal 
+            isOpen={isConfirmOpen} 
+            onClose={() => setIsConfirmOpen(false)} 
+            onConfirm={executeDeleteEvent} 
+            title="¿Borrar evento?" 
+            message="Este evento se eliminará permanentemente."
+            showRecurringOptions={showDeleteOptions}
+        />
 
         <div className="h-full w-full relative bg-transparent cursor-grab active:cursor-grabbing page-container"
           onTouchStart={handleDragStart} onTouchEnd={handleDragEnd}

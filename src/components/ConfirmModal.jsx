@@ -1,6 +1,13 @@
 import React from 'react';
 
-const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText = 'Borrar', cancelText = 'Cancelar', confirmColor = 'bg-red-500 hover:bg-red-600', isWelcome = false }) => {
+const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText = 'Borrar', cancelText = 'Cancelar', confirmColor = 'bg-red-500 hover:bg-red-600', isWelcome = false, showRecurringOptions = false }) => {
+  const [deleteScope, setDeleteScope] = React.useState('SINGLE'); // 'SINGLE' or 'FUTURE'
+
+  // Reset scope when opening
+  React.useEffect(() => {
+      if (isOpen) setDeleteScope('SINGLE');
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
@@ -21,6 +28,23 @@ const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText 
           {message || 'Esta acción no se puede deshacer.'}
         </p>
 
+        {showRecurringOptions && (
+            <div className="mb-6 bg-gray-100 p-1 rounded-lg flex">
+                <button 
+                    onClick={() => setDeleteScope('SINGLE')}
+                    className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${deleteScope === 'SINGLE' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}
+                >
+                    Solo este
+                </button>
+                <button 
+                    onClick={() => setDeleteScope('FUTURE')}
+                    className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${deleteScope === 'FUTURE' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}
+                >
+                    Este y futuros
+                </button>
+            </div>
+        )}
+
         <div className="flex gap-3 justify-center">
           <button
             onClick={onClose}
@@ -31,7 +55,7 @@ const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText 
           
           <button
             onClick={() => {
-              onConfirm();
+              onConfirm(deleteScope);
               onClose();
             }}
             className={`
