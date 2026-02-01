@@ -1,0 +1,211 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-transparent text-slate-900 overflow-hidden select-none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Ocultar scrollbar pero permitir scroll */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* --- NUEVA ANIMACIÓN TIPO "HARD FLIP" --- */
+
+/* El contenedor de la animación */
+.page-container {
+  perspective: 2000px; /* Profundidad 3D */
+  transform-style: preserve-3d;
+  width: 100%;
+  height: 100%;
+  overflow: hidden; /* Importante para que no se salga al girar */
+}
+
+/* La animación de la hoja */
+@keyframes openHardPage {
+  0% { 
+    opacity: 0;
+    transform: rotateY(-90deg); /* Empieza cerrada a la izquierda (90 grados) */
+  }
+  100% { 
+    opacity: 1;
+    transform: rotateY(0deg);   /* Termina plana (0 grados) */
+  }
+}
+
+.animate-page-turn {
+  /* El punto de giro es la IZQUIERDA (el lomo de la agenda) */
+  transform-origin: left center; 
+  animation: openHardPage 0.6s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  will-change: transform;
+  backface-visibility: hidden; /* Oculta la parte de atrás para evitar parpadeos */
+  width: 100%;
+  height: 100%;
+  background: white; /* Asegura que la hoja sea blanca sólida */
+}
+
+/* Permitir seleccionar texto en inputs */
+.select-text {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* --- ESTILOS DATEPICKER (VERSIÓN FINAL) --- */
+
+.react-datepicker {
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif !important;
+  border: none !important;
+  border-radius: 1rem !important;
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.2) !important;
+  padding: 0.8rem !important;
+  background-color: white !important;
+  width: 260px !important;
+  
+  /* --- ESTO ARREGLA LA HORA FLOTANDO --- */
+  display: flex !important;
+  flex-direction: column !important; /* Obliga a los hijos a ir uno debajo de otro */
+  align-items: center !important;
+}
+
+.react-datepicker__header {
+  background-color: white !important;
+  border-bottom: none !important;
+  padding-top: 0.2rem !important;
+  position: relative !important;
+  width: 100% !important;
+}
+
+.react-datepicker__current-month {
+  font-size: 0.9rem !important;
+  font-weight: 800 !important;
+  color: #1f2937 !important;
+  margin-bottom: 0.5rem !important;
+  text-transform: capitalize !important;
+}
+
+/* Flechas */
+.react-datepicker__navigation {
+  top: 8px !important;
+}
+.react-datepicker__navigation--previous {
+  left: 20px !important; 
+}
+.react-datepicker__navigation--next {
+  right: 20px !important;
+}
+
+/* Días */
+.react-datepicker__day-name {
+  color: #9ca3af !important;
+  font-weight: 700 !important;
+  width: 1.8rem !important;
+  font-size: 0.65rem !important;
+  margin: 0.1rem !important;
+}
+
+.react-datepicker__day {
+  width: 1.8rem !important;
+  height: 1.8rem !important;
+  line-height: 1.8rem !important;
+  font-size: 0.8rem !important;
+  border-radius: 9999px !important;
+  margin: 0.1rem !important;
+  font-weight: 500 !important;
+}
+
+.react-datepicker__day:hover {
+  background-color: #eff6ff !important;
+  color: #2563eb !important;
+}
+
+.react-datepicker__day--selected, 
+.react-datepicker__day--keyboard-selected {
+  background-color: #2563eb !important;
+  color: white !important;
+  font-weight: 700 !important;
+}
+
+.react-datepicker__day--today {
+  color: #2563eb !important;
+  font-weight: 900 !important;
+}
+
+/* Elementos ocultos */
+.react-datepicker__time-container,
+.react-datepicker__year-read-view--down-arrow,
+.react-datepicker__month-read-view--down-arrow {
+  display: none !important;
+}
+.react-datepicker__header__dropdown {
+    margin-top: -5px !important;
+}
+
+/* Contenedor del mes (asegurar ancho completo) */
+.react-datepicker__month-container {
+    width: 100% !important;
+}
+
+
+/* --- ESTILOS DEL SELECTOR DE AÑO (DROPDOWN) --- */
+
+/* El contenedor principal del desplegable */
+.react-datepicker__year-dropdown {
+  background-color: white !important;
+  border: none !important;
+  border-radius: 1rem !important; /* Bordes muy redondeados */
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.2) !important; /* Sombra flotante */
+  width: 140px !important; /* Un poco más ancho para que respire */
+  left: 50% !important;
+  transform: translateX(-50%) !important; /* Centrado respecto al título */
+  padding: 0.5rem !important;
+  z-index: 1000 !important;
+}
+
+/* El contenedor scrolleable interno */
+.react-datepicker__year-dropdown--scrollable {
+  height: 220px !important; /* Altura fija */
+  border-radius: 0.8rem !important;
+  margin: 0 !important;
+}
+
+/* Ocultar la barra de scroll (pero permitir scrollear) para que se vea limpio */
+.react-datepicker__year-dropdown--scrollable::-webkit-scrollbar {
+  width: 0px;
+  background: transparent;
+}
+
+/* Cada opción de año */
+.react-datepicker__year-option {
+  padding: 0.6rem 0 !important;
+  font-size: 0.9rem !important;
+  font-weight: 600 !important;
+  color: #4b5563 !important; /* Gray-600 */
+  transition: all 0.2s !important;
+  border-radius: 0.5rem !important; /* Redondear cada elemento al pasar el mouse */
+  cursor: pointer !important;
+  position: relative !important;
+}
+
+/* Hover en los años */
+.react-datepicker__year-option:hover {
+  background-color: #eff6ff !important; /* Blue-50 */
+  color: #2563eb !important; /* Blue-600 */
+}
+
+/* Año seleccionado (El que tiene el tick ✓) */
+.react-datepicker__year-option--selected_year {
+  color: #2563eb !important;
+  font-weight: 800 !important;
+  background-color: transparent !important;
+}
+
+/* Quitar las flechas feas de arriba/abajo dentro del dropdown */
+.react-datepicker__navigation--years {
+  display: none !important;
+}
+
+/* Posicionar el tick ✓ de seleccionado */
+.react-datepicker__year-option--selected_year::before {
+    display: none !important; /* A veces la librería pone símbolos raros, mejor ocultar default */
+}

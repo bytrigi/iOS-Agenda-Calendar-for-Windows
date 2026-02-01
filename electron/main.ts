@@ -1,0 +1,113 @@
+import { app, BrowserWindow, ipcMain, screen } from 'electron'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
+
+const require = createRequire(import.meta.url)
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+process.env.APP_ROOT = path.join(__dirname, '..')
+
+export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
+export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
+export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
+
+process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
+
+let win: BrowserWindow | null
+
+app.disableHardwareAcceleration() 
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId('Planner App')
+}
+
+function createWindow() {
+  win = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    show: false,
+    frame: false,
+    transparent: true, 
+    backgroundColor: '#00000000',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(process.env.APP_ROOT, 'dist-electron', 'preload.mjs'),
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: true 
+    }
+  })
+
+  win.on('ready-to-show', () => {
+    win?.show()
+  })
+
+  if (VITE_DEV_SERVER_URL) {
+    win.loadURL(VITE_DEV_SERVER_URL)
+  } else {
+    win.loadFile(path.join(RENDERER_DIST, 'index.html'))
+  }
+}
+
+// ========================================================
+// 🚦 CONTROL DE VENTANA - FUERZA BRUTA
+// ========================================================
+
+ipcMain.on('window-min', () => {
+  win?.minimize();
+});
+
+ipcMain.on('window-max', () => {
+  if (win) {
+    // 1. OBTENER ESTADO ACTUAL
+    const isMaximizedState = win.isMaximized();
+    
+    // 2. OBTENER TAMAÑOS REALES (Por si isMaximized miente)
+    const { width: currentW, height: currentH } = win.getBounds();
+    const currentDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const { width: screenW, height: screenH } = currentDisplay.workArea;
+
+    // Si ocupa casi toda la pantalla (margen 50px), asumimos que está MAXIMIZADA
+    const isVisuallyMaximized = currentW >= (screenW - 50) && currentH >= (screenH - 50);
+
+    // 3. DECISIÓN: Si está maximizada (oficial o visualmente) -> RESTAURAR
+    if (isMaximizedState || isVisuallyMaximized) {
+      console.log('📉 Acción: FORZAR RESTAURACIÓN');
+      
+      // Intentamos el método suave
+      win.unmaximize();
+      
+      // ⚠️ TRUCO DE FUERZA BRUTA:
+      // Si después de un milisegundo sigue siendo gigante, forzamos el tamaño
+      const { width: checkW } = win.getBounds();
+      if (checkW >= (screenW - 50)) {
+         win.setBounds({ width: 1200, height: 800 }); // Tamaño original forzado
+         win.center(); // La centramos para que no quede rara
+      }
+      
+    } else {
+      console.log('📈 Acción: MAXIMIZAR');
+      win.maximize();
+    }
+  }
+});
+
+ipcMain.on('window-close', () => {
+  win?.close();
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit()
+    win = null
+  }
+})
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow()
+  }
+})
+
+app.whenReady().then(createWindow)
