@@ -331,19 +331,49 @@ function App() {
   // Mejor exponer fetchICloudCalendars y handleConfirmSync.
 
 
-  // Background Sync Loop
+  // Background Sync Loop & Sync on Focus
+  const lastSyncTimeRef = useRef(0);
+
   useEffect(() => {
-      if (!iCloudConfig) return; // Don't verify if not logged in
+      if (!iCloudConfig) return; 
 
-      const intervalId = setInterval(() => {
-          if (navigator.onLine) {
-              // Silent sync
-              console.log("Background Sync Running...");
-              syncEventsFromConfig(iCloudConfig, true);
+      // Función de sync segura con Cooldown de 10 segundos
+      const runSmartSync = async (reason) => {
+          const now = Date.now();
+          if (now - lastSyncTimeRef.current < 10000) {
+              // Skip if synced recently
+              return;
           }
-      }, 60000); // Check every 60s
+          
+          if (navigator.onLine) {
+              console.log(`Smart Sync initiated by: ${reason}`);
+              lastSyncTimeRef.current = now;
+              await syncEventsFromConfig(iCloudConfig, true);
+          }
+      };
 
-      return () => clearInterval(intervalId);
+      // 1. Loop regular (más rápido: 30s)
+      const intervalId = setInterval(() => {
+          runSmartSync('interval');
+      }, 30000); 
+
+      // 2. Sync al volver a la ventana (UX mágica "siempre actualizado")
+      const handleFocus = () => {
+          runSmartSync('focus');
+      };
+
+      window.addEventListener('focus', handleFocus);
+      window.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') handleFocus();
+      });
+
+      // Run immediately on mount/login
+      runSmartSync('init');
+
+      return () => {
+          clearInterval(intervalId);
+          window.removeEventListener('focus', handleFocus);
+      };
   }, [iCloudConfig]);
 
 
