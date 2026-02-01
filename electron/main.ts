@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
-const require = createRequire(import.meta.url)
+// const require = createRequire(import.meta.url) // Removed unused require
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 process.env.APP_ROOT = path.join(__dirname, '..')
@@ -109,5 +109,34 @@ app.on('activate', () => {
     createWindow()
   }
 })
+
+
+// ========================================================
+// ☁️ ICLOUD PROXY (Bypass CORS)
+// ========================================================
+import axios from 'axios';
+
+ipcMain.handle('icloud-request', async (_event, { method, url, data, headers, auth }) => {
+  try {
+    const response = await axios({
+      method,
+      url,
+      data,
+      headers,
+      auth,
+      // IMPORTANTE: Axios en Node sigue redirecciones por defecto, pero
+      // CalDAV a veces necesita manejo especial. Por ahora default está bien.
+    });
+    return { success: true, data: response.data, status: response.status };
+  } catch (error: any) {
+    console.error('Proxy Error:', error.message);
+    return { 
+      success: false, 
+      error: error.message, 
+      status: error.response?.status,
+      data: error.response?.data 
+    };
+  }
+});
 
 app.whenReady().then(createWindow)

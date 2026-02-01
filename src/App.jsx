@@ -107,6 +107,43 @@ function App() {
 
   const handleSaveEvent = async (eventData) => {
     try {
+        let finalId = eventData.id || crypto.randomUUID();
+        let source = eventData.source || 'local';
+
+        // LOGICA DE GUARDADO EN ICLOUD
+        // Si tenemos config de iCloud y el evento es de iCloud (o nuevo y iCloud está conectado)
+        if (iCloudConfig && (!eventData.source || eventData.source === 'icloud')) {
+            try {
+                const service = new ICloudService(iCloudConfig.email, iCloudConfig.password);
+                
+                // Usamos la URL del calendario guardada en el evento (si existe) o la default
+                const targetCalendarUrl = eventData.calendarUrl || iCloudConfig.defaultCalendarUrl;
+
+                if (eventData.id && eventData.source === 'icloud') {
+                    // ACTUALIZAR (UPDATE)
+                    // Usamos updateEvent que hace PUT directo (sin If-None-Match)
+                    await service.updateEvent(targetCalendarUrl, { ...eventData });
+                    console.log('Evento actualizado en iCloud:', eventData.id);
+                    source = 'icloud';
+                    // Mantener ID original
+                    finalId = eventData.id;
+                } else {
+                    // CREAR (NEW)
+                    const cloudEvent = await service.createEvent(targetCalendarUrl, { ...eventData, id: finalId });
+                    console.log('Evento creado en iCloud:', cloudEvent);
+                    finalId = cloudEvent.id; 
+                    source = 'icloud';
+                }
+
+            } catch (cloudError) {
+                console.error('Error sincronizando con iCloud:', cloudError);
+                // Si falla actualización por 412/404, quizá deberíamos intentar crear? 
+                // Por ahora, fallback a local y alerta.
+                alert('Error al sincronizar con iCloud. Se guardará localmente.\n' + cloudError.message);
+                source = 'local'; 
+            }
+        }
+
         const dataToSave = {
             title: eventData.title || 'Sin título',
             start: new Date(eventData.start).toISOString(),
@@ -115,13 +152,17 @@ function App() {
             description: eventData.description,
             allDay: !!eventData.allDay,
             reminder: eventData.reminder || 0,
-            type: 'event'
+            type: 'event',
+            source: source,
+            id: finalId,
+            calendarUrl: eventData.calendarUrl || iCloudConfig?.defaultCalendarUrl // Guardar a qué calendario pertenece
         };
 
         if (eventData.id) {
             await db.events.update(eventData.id, dataToSave);
         } else {
-            await db.events.add({ ...dataToSave, id: crypto.randomUUID() });
+            // Usamos put en lugar de add para asegurar idempotencia si el ID ya existe
+            await db.events.put(dataToSave);
         }
         setIsModalOpen(false);
         setSelectedEvent(null);
@@ -146,46 +187,164 @@ function App() {
   // ☁️ ICLOUD SYNC
   // ==================================================================================
 
-  const handleICloudSync = async (email, password) => {
-      const service = new ICloudService(email, password);
-      
-      // 1. Obtener calendarios
-      const calendars = await service.getCalendars();
-      if (calendars.length === 0) throw new Error("No se encontraron calendarios de iCloud.");
-      
-      // 2. Definir rango: 6 meses atrás -> 1 año futuro
-      const now = new Date();
-      const startDate = subMonths(startOfMonth(now), 6);
-      const endDate = addMonths(startOfMonth(now), 12);
-      
-      let totalEvents = [];
+  // Estado para credenciales (Persistencia simple)
+  const [iCloudConfig, setICloudConfig] = useState(() => {
+    // Config structure: { email, password, enabledCalendars: [{name, url, color}], defaultCalendarUrl }
+    const saved = localStorage.getItem('icloud_config');
+    return saved ? JSON.parse(saved) : null;
+  });
 
-      // 3. Iterar y obtener eventos
-      for (const cal of calendars) {
-          const events = await service.getEvents(cal.url, startDate, endDate);
-          totalEvents = [...totalEvents, ...events];
-      }
+  // Onboarding Status
+  const [isSyncPromptOpen, setIsSyncPromptOpen] = useState(false);
 
-      // 4. Mapear y guardar en Dexie
-      const mappedEvents = totalEvents.map(evt => ({
-        id: evt.id, // UID de Apple
-        title: evt.title || 'Sin título',
-        start: evt.start,
-        end: evt.end,
-        allDay: evt.allDay || false,
-        color: 'bg-blue-100', // Color distintivo para iCloud
-        description: evt.description || '',
-        source: 'icloud',
-        calendarName: 'iCloud',
-        type: 'event'
-      }));
+  // Check Onboarding
+  useEffect(() => {
+     // Check if we already asked
+     const hasAsked = localStorage.getItem('has_asked_icloud_sync');
+     if (!hasAsked) {
+         // wait a bit for nice UX
+         setTimeout(() => setIsSyncPromptOpen(true), 1500);
+     }
+  }, []);
 
-      if (mappedEvents.length > 0) {
-          await db.events.bulkPut(mappedEvents);
-      }
-      
-      return mappedEvents;
+  const handleOnboardingConfirm = () => {
+      setIsSyncPromptOpen(false);
+      localStorage.setItem('has_asked_icloud_sync', 'true');
+      setIsSettingsOpen(true);
   };
+
+  const handleOnboardingCancel = () => {
+      setIsSyncPromptOpen(false);
+      localStorage.setItem('has_asked_icloud_sync', 'true');
+      // User declined.
+  };
+
+  // 1. LOGIN / FETCH CALENDARS (Step 1 of Sync)
+  // Returns list of calendars found for the user to choose
+  const fetchICloudCalendars = async (email, password) => {
+      const service = new ICloudService(email, password);
+      const calendars = await service.getCalendars();
+      if (calendars.length === 0) throw new Error("No se encontraron calendarios.");
+      return calendars; // [{name, url, color?}, ...]
+  };
+
+  // 2. CONFIRM & SYNC EVENTS (Step 2 of Sync)
+  // Recibe la lista de calendarios QUE EL USUARIO QUIERE VER
+  const handleConfirmSync = async (email, password, selectedCalendars) => {
+      // Guardar config
+      // Default: el primero de la lista seleccionada o uno con nombre 'Calendar'
+      const preferredNames = ['Calendario', 'Calendar', 'Home', 'Casa', 'Personal', 'Work', 'Trabajo'];
+      let defaultCal = selectedCalendars.find(c => 
+          c.name && preferredNames.some(p => c.name.toLowerCase().includes(p.toLowerCase()))
+      );
+      if (!defaultCal) defaultCal = selectedCalendars[0];
+
+      const config = { 
+          email, 
+          password, 
+          enabledCalendars: selectedCalendars, 
+          defaultCalendarUrl: defaultCal?.url 
+      };
+      
+      localStorage.setItem('icloud_config', JSON.stringify(config));
+      setICloudConfig(config);
+
+      // Ahora sí, sincronizamos eventos solo de estos calendarios
+      await syncEventsFromConfig(config);
+  };
+
+  // Helper interno para sincronizar usando una config dada
+  const syncEventsFromConfig = async (config, silent = false) => {
+      if (!config || !config.enabledCalendars || config.enabledCalendars.length === 0) return;
+
+      try {
+        if (!silent) console.log("Sincronizando eventos...", config.enabledCalendars.map(c => c.name));
+        const service = new ICloudService(config.email, config.password);
+        
+        // 2. Definir rango
+        const now = new Date();
+        const startDate = subMonths(startOfMonth(now), 6);
+        const endDate = addMonths(startOfMonth(now), 12);
+        
+        let totalEvents = [];
+
+        // 3. Iterar solo calendarios habilitados
+        for (const cal of config.enabledCalendars) {
+            try {
+                const events = await service.getEvents(cal.url, startDate, endDate);
+                // Asignar color si el calendario tiene uno (futuro), o mix.
+                // Por ahora usamos el del calendario si lo tuviera, o default.
+                // Mapear source = icloud
+                const mapped = events.map(evt => ({
+                    id: evt.id,
+                    title: evt.title || 'Sin título',
+                    start: evt.start,
+                    end: evt.end,
+                    allDay: evt.allDay || false,
+                    color: cal.color || 'bg-blue-100', // Podríamos guardar color en el calendario
+                    description: evt.description || '',
+                    source: 'icloud',
+                    calendarName: cal.name, // Importante para la UI
+                    calendarUrl: cal.url,   // Importante para edits
+                    type: 'event'
+                }));
+                totalEvents = [...totalEvents, ...mapped];
+            } catch (err) {
+                console.error(`Error syncing calendar ${cal.name}:`, err);
+            }
+        }
+
+        // 4. Mapear y guardar en Dexie
+        // NOTA: Deberíamos borrar los eventos antiguos de iCloud antes de insertar los nuevos para evitar zombies si se borraron en la nube.
+        // Estrategia simple: Borrar todos los de source='icloud' y reinsertar.
+        if (totalEvents.length > 0) {
+            // Borrado masivo de icloud events antiguo (opcional pero recomendado para sync limpia)
+            // await db.events.where('source').equals('icloud').delete(); // Dexie req compound index or manual filter logic
+            // Para MVP, solo hacemos put (update/insert). Si se borró en nube, aquí seguirá existiendo (known issue).
+            // Fix robusto: Traer todos IDs locales de iCloud, comparar con nuevos, borrar sobrantes.
+            
+            // Implementación simple de limpieza:
+            const existingICloudKeys = await db.events.where('source').equals('icloud').primaryKeys();
+            const newIds = new Set(totalEvents.map(e => e.id));
+            const toDelete = existingICloudKeys.filter(k => !newIds.has(k));
+            
+            if (toDelete.length > 0) await db.events.bulkDelete(toDelete);
+            
+            await db.events.bulkPut(totalEvents);
+        } else {
+             // Si no hay eventos, borrar todos los de iCloud locales?
+             // const count = await db.events.where('source').equals('icloud').count();
+             // if (count > 0) ...
+        }
+        
+        if (!silent) alert(`¡Sincronizado! ${totalEvents.length} eventos.`);
+        return totalEvents;
+
+      } catch (e) {
+        console.error("Error Sync Loop:", e);
+        if (!silent) alert("Error al sincronizar: " + e.message);
+      }
+  };
+
+  // Wrapper para el botón de Settings (Legacy support si SettingsModal llama directo)
+  // Pero SettingsModal será actualizado. Lo dejo como placeholder compatible?
+  // Mejor exponer fetchICloudCalendars y handleConfirmSync.
+
+
+  // Background Sync Loop
+  useEffect(() => {
+      if (!iCloudConfig) return; // Don't verify if not logged in
+
+      const intervalId = setInterval(() => {
+          if (navigator.onLine) {
+              // Silent sync
+              console.log("Background Sync Running...");
+              syncEventsFromConfig(iCloudConfig, true);
+          }
+      }, 60000); // Check every 60s
+
+      return () => clearInterval(intervalId);
+  }, [iCloudConfig]);
 
 
   // ==================================================================================
@@ -297,13 +456,33 @@ function App() {
         <SettingsModal 
             isOpen={isSettingsOpen} 
             onClose={() => setIsSettingsOpen(false)} 
-            notificationsEnabled={notificationsEnabled}
-
-            onToggleNotifications={toggleNotifications}
-            onSyncICloud={handleICloudSync}
+            onFetchCalendars={fetchICloudCalendars}
+            onConfirmSync={handleConfirmSync}
+            initialConfig={iCloudConfig}
         />
 
-        <EventModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSaveEvent} onDelete={handleRequestDelete} defaultDate={currentDate} eventToEdit={selectedEvent} />
+        {/* ONBOARDING MODAL */}
+        <ConfirmModal 
+            isOpen={isSyncPromptOpen} 
+            onClose={handleOnboardingCancel} 
+            onConfirm={handleOnboardingConfirm} 
+            title="Bienvenido a iOS Calendar for Windows!" 
+            message="¿Deseas vincular tu cuenta de iCloud para sincronizar tu calendario de Apple?"
+            confirmText="¡Sí!"
+            cancelText="Quizá más tarde"
+            confirmColor="bg-blue-500 hover:bg-blue-600 shadow-blue-500/30"
+            isWelcome={true}
+        />
+
+        <EventModal 
+            isOpen={isModalOpen} 
+            onClose={() => setIsModalOpen(false)} 
+            onSave={handleSaveEvent} 
+            onDelete={handleRequestDelete} 
+            defaultDate={currentDate} 
+            eventToEdit={selectedEvent} 
+            calendars={iCloudConfig?.enabledCalendars || []}
+        />
         <ConfirmModal isOpen={isConfirmOpen} onClose={() => setIsConfirmOpen(false)} onConfirm={executeDeleteEvent} title="¿Borrar evento?" message="Este evento se eliminará permanentemente." />
 
         <div className="h-full w-full relative bg-transparent cursor-grab active:cursor-grabbing page-container"

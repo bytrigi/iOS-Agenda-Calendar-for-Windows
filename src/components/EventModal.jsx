@@ -86,7 +86,7 @@ const CustomSelect = ({ value, options, onChange, icon: Icon, align = 'left', co
     );
 };
 
-const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdit }) => {
+const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdit, calendars }) => {
   const [title, setTitle] = useState('');
   const [start, setStart] = useState(new Date());
   const [end, setEnd] = useState(new Date());
@@ -94,6 +94,7 @@ const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdi
   const [color, setColor] = useState('bg-blue-100');
   const [description, setDescription] = useState('');
   const [reminder, setReminder] = useState(0);
+  const [selectedCalendarUrl, setSelectedCalendarUrl] = useState('');
 
   const reminderOptions = [
       { value: 0, label: 'Sin recordatorio' },
@@ -124,6 +125,7 @@ const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdi
         setColor(eventToEdit.color || 'bg-blue-100');
         setDescription(eventToEdit.description || '');
         setReminder(eventToEdit.reminder || 0);
+        setSelectedCalendarUrl(eventToEdit.calendarUrl || (calendars?.[0]?.url) || '');
       } else {
         setTitle('');
         const d = defaultDate || new Date();
@@ -139,9 +141,11 @@ const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdi
         setColor('bg-blue-100');
         setDescription('');
         setReminder(0);
+        // Default select first available calendar if exists
+        setSelectedCalendarUrl(calendars?.[0]?.url || '');
       }
     }
-  }, [isOpen, eventToEdit, defaultDate]);
+  }, [isOpen, eventToEdit, defaultDate, calendars]);
 
   if (!isOpen) return null;
 
@@ -154,7 +158,8 @@ const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdi
       allDay,
       color,
       description,
-      reminder: parseInt(reminder)
+      reminder: parseInt(reminder),
+      calendarUrl: selectedCalendarUrl
     });
   };
 
@@ -320,6 +325,20 @@ const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdi
                 </div>
              </div>
           </div>
+
+          {/* CALENDARIO SELECTOR (Si hay calendarios disponibles) */}
+          {calendars && calendars.length > 0 && (
+             <div className="w-full">
+                <CustomSelect 
+                    value={selectedCalendarUrl} 
+                    options={calendars.map(c => ({ value: c.url, label: c.name }))}
+                    onChange={(val) => setSelectedCalendarUrl(val)}
+                    icon={CalendarIcon}
+                />
+             </div>
+          )}
+
+          {/* RECORDATORIO */}
 
           {/* RECORDATORIO */}
           <div className="w-full">
