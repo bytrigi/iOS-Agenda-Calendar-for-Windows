@@ -372,11 +372,11 @@ const SettingsModal = ({ isOpen, onClose, iCloudConfig, onConnect, appSettings, 
                              <img src="/logo.png" alt="Logo" className="w-16 h-16"/>
                          </div>
                          <div>
-                             <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100">Planner App</h3>
-                             <p className="text-sm text-gray-400 dark:text-gray-500">Versión 1.2.0 (Windows)</p>
+                             <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100">iOS Calendar for Windows</h3>
+                             <p className="text-sm text-gray-400 dark:text-gray-500">Versión 1.0.0</p>
                          </div>
                          <div className="text-xs text-gray-400 dark:text-gray-500 max-w-xs mt-8">
-                             Esta aplicación es un proyecto personal diseñado para integrar el ecosistema de productividad de Apple en Windows.
+                             Esta aplicación es un proyecto diseñado para integrar el ecosistema de calendario de Apple en Windows.
                          </div>
                     </div>
                 )}

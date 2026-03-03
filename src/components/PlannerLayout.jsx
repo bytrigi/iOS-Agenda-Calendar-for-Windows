@@ -40,9 +40,6 @@ const PlannerLayout = ({ activeTab, setActiveTab, children, onAddEvent, onSearch
         {/* LOMO DE LA AGENDA */}
         <div className="w-20 bg-[#2d3342] flex flex-col items-center pt-4 space-y-6 z-20 relative shadow-lg">
              <CustomTitleBar />
-             <div className="w-2 h-2 rounded-full bg-slate-600/50 mt-2 shadow-inner"></div>
-             <div className="w-2 h-2 rounded-full bg-slate-600/50 shadow-inner"></div>
-             <div className="w-2 h-2 rounded-full bg-slate-600/50 shadow-inner"></div>
         </div>
 
         {/* PÁGINA PRINCIPAL */}
