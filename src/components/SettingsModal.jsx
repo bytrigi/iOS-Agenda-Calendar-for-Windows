@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Cloud, Loader2, CheckCircle, AlertCircle, Calendar as CalendarIcon, ArrowLeft, Settings, Info, Monitor, Clock, Layout } from 'lucide-react';
 
-const SettingsModal = ({ isOpen, onClose, iCloudConfig, onConnect, appSettings, onUpdateSettings }) => {
-  const [activeTab, setActiveTab] = useState('general'); // 'general' | 'icloud' | 'about'
+const SettingsModal = ({ isOpen, onClose, iCloudConfig, onConnect, appSettings, onUpdateSettings, initialTab = 'general' }) => {
+  const [activeTab, setActiveTab] = useState(initialTab); // 'general' | 'icloud' | 'about'
 
   const [localSettings, setLocalSettings] = useState(appSettings || { startOfWeek: 'monday', defaultDuration: 60, theme: 'light' });
   const [hasChanges, setHasChanges] = useState(false);
@@ -12,8 +12,9 @@ const SettingsModal = ({ isOpen, onClose, iCloudConfig, onConnect, appSettings, 
       if (isOpen) {
           setLocalSettings(appSettings || { startOfWeek: 'monday', defaultDuration: 60, theme: 'light' });
           setHasChanges(false);
+          setActiveTab(initialTab);
       }
-  }, [isOpen, appSettings]);
+  }, [isOpen, appSettings, initialTab]);
 
   const handleLocalSettingChange = (updates) => {
       const newSettings = { ...localSettings, ...updates };
@@ -369,7 +370,7 @@ const SettingsModal = ({ isOpen, onClose, iCloudConfig, onConnect, appSettings, 
                 {activeTab === 'about' && (
                     <div className="flex flex-col items-center justify-center h-full text-center space-y-4 animate-in fade-in zoom-in-95 duration-300">
                          <div>
-                             <img src="/logo.png" alt="Logo" className="w-16 h-16"/>
+                             <img src="./logo.png" alt="Logo" className="w-16 h-16"/>
                          </div>
                          <div>
                              <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100">iOS Calendar for Windows</h3>

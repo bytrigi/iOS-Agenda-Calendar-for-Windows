@@ -93,7 +93,13 @@ const TasksView = () => {
                 const newSubtasks = parentTask.subtasks.map(s => 
                     s.id === subtaskId ? { ...s, completed: !s.completed } : s
                 );
-                await db.tasks.update(parentId, { subtasks: newSubtasks });
+                
+                const allCompleted = newSubtasks.length > 0 && newSubtasks.every(s => s.completed);
+                
+                await db.tasks.update(parentId, { 
+                    subtasks: newSubtasks,
+                    ...(allCompleted ? { completed: true } : {}) 
+                });
             }
         });
     };

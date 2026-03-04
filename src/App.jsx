@@ -23,13 +23,21 @@ function App() {
   const [activeTab, setActiveTab] = useState('day');
   const [currentDate, setCurrentDate] = useState(new Date());
   
-  // ESTADOS MODALES
+  // ESTADOS MODALES Y NOTIFICACIONES
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [showDeleteOptions, setShowDeleteOptions] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState('general');
+  const [toastMessage, setToastMessage] = useState(null);
+  const [syncAlert, setSyncAlert] = useState(null);
+
+  const showToast = (msg) => {
+      setToastMessage(msg);
+      setTimeout(() => setToastMessage(null), 3500);
+  };
 
   // ESTADO NOTIFICACIONES
   const [notificationsEnabled, setNotificationsEnabled] = useState(Notification.permission === 'granted');
@@ -104,15 +112,19 @@ function App() {
   // ==================================================================================
 
   const openCreateModal = (slotDate = null) => { 
-      // Si slotDate viene del click en el calendario, usarlo. Si no, usar now.
-      // Default duration: appSettings.defaultDuration
-      setSelectedEvent({
-          start: slotDate ? slotDate : new Date(),
-          // End será start + defaultDuration
-          // Nota: EventModal calcula end si no existe? O lo precalculamos aquí.
-          // Mejor pasar null y que EventModal ponga defaults, PERO EventModal necesita saber la defaultDuration.
-          // Vamos a pasar un objeto "nuevo" con duración precalculada.
-      }); 
+      // Si slotDate viene del click global (es un MouseEvent React) lo ignoramos.
+      const safeDate = (slotDate && typeof slotDate.getMonth === 'function') ? slotDate : null;
+      
+      if (!safeDate) {
+          setSelectedEvent(null); // Esto activará el form vacío ("else" en EventModal)
+      } else {
+          const eEnd = new Date(safeDate);
+          eEnd.setMinutes(eEnd.getMinutes() + (appSettings?.defaultDuration || 60));
+          setSelectedEvent({
+              start: safeDate,
+              end: eEnd
+          });
+      }
       setIsModalOpen(true); 
   };
   const openEditModal = (event) => { setSelectedEvent(event); setIsModalOpen(true); };
@@ -123,8 +135,8 @@ function App() {
         let source = eventData.source || 'local';
 
         // LOGICA DE GUARDADO EN ICLOUD
-        // Si tenemos config de iCloud y el evento es de iCloud (o nuevo y iCloud está conectado)
-        if (iCloudConfig && (!eventData.source || eventData.source === 'icloud')) {
+        // Si tenemos config de iCloud y el evento es de iCloud (o nuevo) Y no se seleccionó explicitly 'local'
+        if (iCloudConfig && eventData.calendarUrl !== 'local' && (!eventData.source || eventData.source === 'icloud')) {
             try {
                 const service = new ICloudService(iCloudConfig.email, iCloudConfig.password);
                 
@@ -169,7 +181,7 @@ function App() {
                    }
                 } else {
                     console.error('Error sincronizando con iCloud:', cloudError);
-                    alert('Error al sincronizar con iCloud. Se guardará localmente.\n' + cloudError.message);
+                    showToast('⚠️ Error iCloud: Se guardará localmente.');
                     source = 'local';
                 } 
             }
@@ -189,14 +201,67 @@ function App() {
             calendarUrl: eventData.calendarUrl || iCloudConfig?.defaultCalendarUrl, // Guardar a qué calendario pertenece
             lastUpdated: Date.now(), // DEBOUNCE MARKER: Marca de tiempo local para evitar sobrescritura por sync lag
             recurrence: eventData.recurrence,
-            recurrenceEnd: eventData.recurrenceEnd
+            recurrenceEnd: eventData.recurrenceEnd,
+            icsUrl: eventData.icsUrl || null
         };
 
-        if (eventData.id) {
-            await db.events.update(eventData.id, dataToSave);
+        // =========================================================================================
+        // EXPANSION LOCAL DE RECURRENCIAS
+        // Para que el calendario muestre las recurrencias de eventos locales, generamos las 
+        // instancias físicamente en Dexie (igual que hace iCloudService para los de la nube).
+        // =========================================================================================
+        
+        if (source === 'local' && eventData.recurrence && eventData.recurrence !== 'NONE') {
+            const baseStart = new Date(eventData.start);
+            const baseEnd = new Date(eventData.end);
+            const durationMs = baseEnd.getTime() - baseStart.getTime();
+            
+            // Limite de seguridad: Fecha de fin o 2 años
+            const limitDate = eventData.recurrenceEnd ? new Date(eventData.recurrenceEnd) : addYears(baseStart, 2);
+            limitDate.setHours(23, 59, 59, 999);
+            
+            const instancesToSave = [];
+            let currentStart = baseStart;
+            
+            while (currentStart <= limitDate && instancesToSave.length < 500) {
+                const currentEnd = new Date(currentStart.getTime() + durationMs);
+                
+                instancesToSave.push({
+                    ...dataToSave,
+                    id: currentStart.getTime() === baseStart.getTime() ? finalId : `${finalId}_${currentStart.toISOString()}`,
+                    originalId: finalId,
+                    recurrenceId: currentStart.getTime() === baseStart.getTime() ? null : currentStart.toISOString(),
+                    start: currentStart.toISOString(),
+                    end: currentEnd.toISOString()
+                });
+                
+                // Avanzar según la regla
+                if (eventData.recurrence === 'DAILY') currentStart = addDays(currentStart, 1);
+                else if (eventData.recurrence === 'WEEKLY') currentStart = addWeeks(currentStart, 1);
+                else if (eventData.recurrence === 'MONTHLY') currentStart = addMonths(currentStart, 1);
+                else if (eventData.recurrence === 'YEARLY') currentStart = addYears(currentStart, 1);
+                else break; 
+            }
+            
+            // Si es un edit, primero limpiamos las viejas instancias generadas
+            if (eventData.id) {
+                const masterId = eventData.originalId || eventData.id;
+                const allEvts = await db.events.toArray();
+                const oldInstances = allEvts.filter(e => e.originalId === masterId || e.id === masterId);
+                const oldIds = oldInstances.map(i => i.id);
+                if (oldIds.length > 0) await db.events.bulkDelete(oldIds);
+            }
+            
+            await db.events.bulkPut(instancesToSave);
+
         } else {
-            // Usamos put en lugar de add para asegurar idempotencia si el ID ya existe
-            await db.events.put(dataToSave);
+            // Guardado normal (Eventos únicos locales, o cualquier evento de iCloud que será 
+            // aplastado en breves por el Smart Sync)
+            if (eventData.id) {
+                await db.events.update(eventData.id, dataToSave);
+            } else {
+                await db.events.put(dataToSave);
+            }
         }
         setIsModalOpen(false);
         setSelectedEvent(null);
@@ -238,7 +303,7 @@ function App() {
                   
                   // CASO 1: Borrar Solo Esta Instancia
                   if (scope === 'SINGLE' && selectedEvent.originalId) {
-                      await service.excludeInstance(targetUrl, selectedEvent.originalId, selectedEvent.start);
+                      await service.excludeInstance(targetUrl, selectedEvent.originalId, selectedEvent.start, selectedEvent.icsUrl);
                       actionCompleted = true;
                   } 
                   // CASO 2: Borrar Esta y Futuras
@@ -246,7 +311,7 @@ function App() {
                        // Fecha límite = El día de AYER (para cortar antes de hoy)
                        const cutOffDate = new Date(selectedEvent.start);
                        cutOffDate.setDate(cutOffDate.getDate() - 1);
-                       await service.truncateSeries(targetUrl, selectedEvent.originalId, cutOffDate);
+                       await service.truncateSeries(targetUrl, selectedEvent.originalId, cutOffDate, selectedEvent.icsUrl);
                        actionCompleted = true;
                   }
                   // CASO 3: Borrar Todo (Default)
@@ -254,15 +319,14 @@ function App() {
                        // Si es instancia, borrar el Master? O si es Master?
                        // Si scope es ALL, borramos por ID.
                        const idToDelete = selectedEvent.originalId || selectedEvent.id;
-                       await service.deleteEvent(targetUrl, idToDelete);
+                       await service.deleteEvent(targetUrl, idToDelete, selectedEvent.icsUrl);
                        actionCompleted = true;
                   }
                   
                   console.log(`Evento borrado de iCloud (Scope: ${scope})`);
               } catch (e) {
-                  console.error("Error borrando de iCloud:", e);
-                  alert("No se pudo borrar de iCloud. " + e.message);
-                  return; // Stop if cloud failed? Or continue local? Let's continue local.
+                  console.error("Error borrando de iCloud (ignorado para permitir borrado local):", e);
+                  // No retornamos. Continuamos borrando localmente aunque la nube falle o ya no exista.
               }
           }
 
@@ -274,7 +338,10 @@ function App() {
               // Borrar este y todos los que tengan mismo originalId y start >= este start
               const startIso = new Date(selectedEvent.start).toISOString();
               // Buscar futuros
-              const related = await db.events.where('originalId').equals(selectedEvent.originalId || selectedEvent.id).toArray();
+              const allEvts = await db.events.toArray();
+              const targetOriginalId = selectedEvent.originalId || selectedEvent.id;
+              const related = allEvts.filter(e => e.originalId === targetOriginalId || e.id === targetOriginalId);
+              
               const toDelete = related.filter(e => e.start >= startIso).map(e => e.id);
               // Tambien borrar el propio evento si no lo pillo el query
               if (!toDelete.includes(selectedEvent.id)) toDelete.push(selectedEvent.id);
@@ -283,20 +350,19 @@ function App() {
           } else {
               // ALL: Borrar por ID. Y si es Master, borrar sus instancias?
               if (selectedEvent.originalId) {
-                 // Es una instancia. Si borramos ALL, ¿queremos borrar la serie entera? 
-                 // Si el usuario eligió "Default" (o no salio opcion), asumimos borrar este item?
-                 // NO, si el usuario dice "Borrar" en instancia, debería salir el popup options.
-                 // Si sale ALL aqui, es que borro todo.
-                 // Borrar Master + Todas Instancias
+                 // Es una instancia.
                  const masterId = selectedEvent.originalId;
                  await db.events.delete(masterId); // Borrar Master si existe
-                 const instances = await db.events.where('originalId').equals(masterId).primaryKeys();
-                 await db.events.bulkDelete(instances);
+                 
+                 const allEvts = await db.events.toArray();
+                 const instances = allEvts.filter(e => e.originalId === masterId).map(e => e.id);
+                 if (instances.length > 0) await db.events.bulkDelete(instances);
               } else {
                  // Es normal o master
                  await db.events.delete(selectedEvent.id);
                  // Y sus instancias si las hubiera
-                 const instances = await db.events.where('originalId').equals(selectedEvent.id).primaryKeys();
+                 const allEvts = await db.events.toArray();
+                 const instances = allEvts.filter(e => e.originalId === selectedEvent.id).map(e => e.id);
                  if (instances.length > 0) await db.events.bulkDelete(instances);
               }
           }
@@ -377,6 +443,7 @@ function App() {
   const handleOnboardingConfirm = () => {
       setIsSyncPromptOpen(false);
       localStorage.setItem('has_asked_icloud_sync', 'true');
+      setSettingsInitialTab('icloud');
       setIsSettingsOpen(true);
   };
 
@@ -384,6 +451,49 @@ function App() {
       setIsSyncPromptOpen(false);
       localStorage.setItem('has_asked_icloud_sync', 'true');
       // User declined.
+  };
+
+  // ==================================================================================
+  // 🚀 AUTO-UPDATE (PREPARADO PARA ELECTRON-UPDATER)
+  // ==================================================================================
+  const [updateAvailable, setUpdateAvailable] = useState(null);
+
+  useEffect(() => {
+      // 1. Preparado para electron-updater vía IPC (Cuando haya Code Signing)
+      if (window.electronAPI && window.electronAPI.onUpdateAvailable) {
+          window.electronAPI.onUpdateAvailable((info) => {
+              setUpdateAvailable(info.version);
+          });
+      } else {
+          // 2. Mock Fallback (Consulta API GitHub Releases)
+          const checkGitHubRelease = async () => {
+              try {
+                  const currentVersion = "1.0.0"; 
+                  const response = await fetch('https://api.github.com/repos/bytrigi/iOS-Agenda-Calendar-for-Windows/releases/latest');
+                  if (!response.ok) return;
+                  const data = await response.json();
+                  const remoteVersion = data.tag_name ? data.tag_name.replace('v', '') : null;
+                  
+                  if (remoteVersion && remoteVersion !== currentVersion) {
+                      setUpdateAvailable(remoteVersion);
+                  }
+              } catch (e) {
+                  console.log("No se pudo comprobar actualizaciones:", e);
+              }
+          };
+          // Se puede descomentar para habilitar el chequeo manual a GitHub
+          // checkGitHubRelease();
+      }
+  }, []);
+
+  const handleUpdateApp = () => {
+      if (window.electronAPI && window.electronAPI.triggerUpdate) {
+          window.electronAPI.triggerUpdate(); // Llama a electron-updater en Main process
+      } else {
+          // Fallback manual
+          window.open('https://github.com/bytrigi/iOS-Agenda-Calendar-for-Windows/releases/latest');
+      }
+      setUpdateAvailable(null);
   };
 
   // 1. LOGIN / FETCH CALENDARS (Step 1 of Sync)
@@ -462,7 +572,8 @@ function App() {
                     originalId: evt.originalId, 
                     recurrence: evt.recurrence,
                     recurrenceEnd: evt.recurrenceEnd,
-                    recurrenceId: evt.recurrenceId
+                    recurrenceId: evt.recurrenceId,
+                    icsUrl: evt.icsUrl
                 }));
                 totalEvents = [...totalEvents, ...mapped];
             } catch (err) {
@@ -545,12 +656,12 @@ function App() {
              // if (count > 0) ...
         }
         
-        if (!silent) alert(`¡Sincronizado! ${totalEvents.length} eventos.`);
+        if (!silent) setSyncAlert({ title: "Sincronización Completada", message: `Se han sincronizado ${totalEvents.length} eventos con tu cuenta de iCloud.`, isError: false });
         return totalEvents;
 
       } catch (e) {
         console.error("Error Sync Loop:", e);
-        if (!silent) alert("Error al sincronizar: " + e.message);
+        if (!silent) setSyncAlert({ title: "Error de Sincronización", message: "Hubo un problema al sincronizar con iCloud. Por favor, verifica tu conexión o credenciales.", isError: true });
       }
   };
 
@@ -716,11 +827,36 @@ function App() {
         
         <SettingsModal 
             isOpen={isSettingsOpen} 
-            onClose={() => setIsSettingsOpen(false)}
+            onClose={() => {
+                setIsSettingsOpen(false);
+                setSettingsInitialTab('general'); // Reset
+            }}
             iCloudConfig={iCloudConfig}
             onConnect={handleConfirmSync}
             appSettings={appSettings}
             onUpdateSettings={updateAppSettings}
+            initialTab={settingsInitialTab}
+        />
+
+        {/* TOAST / NOTIFICACIONES IN-APP BLUR */}
+        {toastMessage && (
+            <div className="fixed top-14 left-1/2 -translate-x-1/2 z-[99999] animate-fade-in-down pointer-events-none">
+                <div className="bg-white/85 dark:bg-slate-800/85 backdrop-blur-xl border border-gray-200/50 dark:border-slate-700/50 shadow-2xl rounded-full px-5 py-2 flex items-center gap-3">
+                    <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 drop-shadow-sm">{toastMessage}</span>
+                </div>
+            </div>
+        )}
+
+        {/* ALERTA DE ACTUALIZACIÓN */}
+        <ConfirmModal 
+            isOpen={!!updateAvailable} 
+            onClose={() => setUpdateAvailable(null)} 
+            onConfirm={handleUpdateApp} 
+            title="¡Nueva versión disponible!" 
+            message={`La versión ${updateAvailable} está lista para descargar. ¿Deseas actualizar ahora?`}
+            confirmText="Actualizar"
+            cancelText="Más tarde"
+            confirmColor="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700"
         />
 
         {/* ONBOARDING MODAL */}
@@ -736,13 +872,25 @@ function App() {
             isWelcome={true}
         />
 
+        {/* SYNC ALERT MODAL */}
+        <ConfirmModal 
+            isOpen={!!syncAlert} 
+            onClose={() => setSyncAlert(null)} 
+            onConfirm={() => setSyncAlert(null)} 
+            title={syncAlert?.title} 
+            message={syncAlert?.message}
+            confirmText="Aceptar"
+            cancelText="Cerrar"
+            confirmColor={syncAlert?.isError ? "bg-red-500 hover:bg-red-600 shadow-red-500/30" : "bg-blue-500 hover:bg-blue-600 shadow-blue-500/30"}
+        />
+
         <EventModal 
             isOpen={isModalOpen} 
             onClose={() => setIsModalOpen(false)} 
             onSave={handleSaveEvent} 
             onDelete={requestDelete} 
             defaultDate={currentDate} 
-            event={selectedEvent} 
+            eventToEdit={selectedEvent} 
             calendars={iCloudConfig?.enabledCalendars || []}
             defaultDuration={appSettings.defaultDuration}
         />

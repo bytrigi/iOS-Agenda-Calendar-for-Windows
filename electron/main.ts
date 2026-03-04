@@ -5,6 +5,9 @@ import path from 'node:path'
 // const require = createRequire(import.meta.url) // Removed unused require
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+// SILENCE ELECTRON SECURITY WARNINGS IN DEV (Vite requires unsafe-eval)
+process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true';
+
 process.env.APP_ROOT = path.join(__dirname, '..')
 
 export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
@@ -42,6 +45,18 @@ function createWindow() {
   win.on('ready-to-show', () => {
     win?.show()
   })
+
+  // ========================================================
+  // 🛡️ SEGURIDAD EN PRODUCCIÓN: Bloquear DevTools
+  // ========================================================
+  win.webContents.on('before-input-event', (event, input) => {
+    // Si NO estamos en desarrollo, bloqueamos F12 y Ctrl+Shift+I
+    if (!VITE_DEV_SERVER_URL) {
+      if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+        event.preventDefault();
+      }
+    }
+  });
 
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)

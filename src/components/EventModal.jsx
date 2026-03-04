@@ -140,7 +140,7 @@ const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdi
         setReminder(eventToEdit.reminder || 0);
         setRecurrence(eventToEdit.recurrence || 'NONE');
         setRecurrenceEnd(eventToEdit.recurrenceEnd ? new Date(eventToEdit.recurrenceEnd) : null);
-        setSelectedCalendarUrl(eventToEdit.calendarUrl || (calendars?.[0]?.url) || '');
+        setSelectedCalendarUrl(eventToEdit.calendarUrl || 'local');
       } else {
         setTitle('');
         const d = defaultDate || new Date();
@@ -161,7 +161,7 @@ const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdi
         setRecurrence('NONE');
         setRecurrenceEnd(null);
         // Default select first available calendar if exists
-        setSelectedCalendarUrl(calendars?.[0]?.url || '');
+        setSelectedCalendarUrl(calendars?.[0]?.url || 'local');
       }
     }
   }, [isOpen, eventToEdit, defaultDate, calendars]);
@@ -347,17 +347,18 @@ const EventModal = ({ isOpen, onClose, onSave, onDelete, defaultDate, eventToEdi
              </div>
           </div>
 
-          {/* CALENDARIO SELECTOR (Si hay calendarios disponibles) */}
-          {calendars && calendars.length > 0 && (
-             <div className="w-full">
-                <CustomSelect 
-                    value={selectedCalendarUrl} 
-                    options={calendars.map(c => ({ value: c.url, label: c.name }))}
-                    onChange={(val) => setSelectedCalendarUrl(val)}
-                    icon={CalendarIcon}
-                />
-             </div>
-          )}
+          {/* CALENDARIO SELECTOR */}
+          <div className="w-full">
+            <CustomSelect 
+                value={selectedCalendarUrl} 
+                options={[
+                    { value: 'local', label: 'Local (En este equipo)' },
+                    ...(calendars || []).map(c => ({ value: c.url, label: c.name }))
+                ]}
+                onChange={(val) => setSelectedCalendarUrl(val)}
+                icon={CalendarIcon}
+            />
+          </div>
 
           {/* RECORDATORIO */}
 

@@ -240,9 +240,7 @@ export class ICloudService {
       <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
         <d:prop>
           <d:getetag />
-          <c:calendar-data>
-            <c:expand start="${startStr}" end="${endStr}" />
-          </c:calendar-data>
+          <c:calendar-data />
         </d:prop>
         <c:filter>
           <c:comp-filter name="VCALENDAR">
@@ -262,103 +260,145 @@ export class ICloudService {
     if (!responses) return [];
     if (!Array.isArray(responses)) responses = [responses];
 
+    const targetStartT = startDate.getTime();
+    const targetEndT = endDate.getTime();
+
     for (const resp of responses) {
         try {
             const propstats = Array.isArray(resp.propstat) ? resp.propstat : [resp.propstat];
             const props = propstats[0].prop;
-            // Usar _getText para sacar el string VCALENDAR, fast-xml-parser puede devolver objeto
             const calendarData = this._getText(props['calendar-data']); 
+            const href = this._getText(resp.href);
             
-            if (!calendarData) {
-                console.warn('[iCloudService] Evento sin data, saltando...');
-                continue;
-            }
+            if (!calendarData) continue;
 
             const jcal = ICAL.parse(calendarData);
             const comp = new ICAL.Component(jcal);
             const vevents = comp.getAllSubcomponents('vevent');
+            
+            if (vevents.length === 0) continue;
 
-            for (const vevent of vevents) {
-                const event = new ICAL.Event(vevent);
+            // Encontrar Master y Excepciones
+            const masterVevent = vevents.find(v => !v.hasProperty('recurrence-id')) || vevents[0];
+            const exceptions = vevents.filter(v => v !== masterVevent);
+            
+            let masterEvent = null;
+            try {
+               masterEvent = new ICAL.Event(masterVevent);
+               exceptions.forEach(ex => {
+                   masterEvent.relateException(new ICAL.Event(ex));
+               });
+            } catch (e) {
+               console.warn("Error wrapper ICAL.Event:", e);
+               continue;
+            }
+
+            const isAllDay = masterEvent.startDate.isDate;
+            const uid = masterEvent.uid;
+            
+            // EXTRAER PARAMETROS COMUNES (Master RRULE, Color, etc)
+            let recurrence = 'NONE';
+            let recurrenceEnd = null;
+            if (masterEvent.component.hasProperty('rrule')) {
+                const rrule = masterEvent.component.getFirstPropertyValue('rrule');
+                if (rrule && rrule.freq) {
+                    recurrence = rrule.freq.toString(); 
+                    if (rrule.until) {
+                        recurrenceEnd = rrule.until.toJSDate().toISOString();
+                    }
+                }
+            }
+
+            // Expandir Localmente
+            const occurrences = [];
+            
+            if (masterEvent.isRecurring()) {
+                let iterator;
+                try {
+                    iterator = masterEvent.iterator();
+                } catch (e) {
+                    console.warn(`Failed to create iterator for event ${uid}`, e);
+                }
+
+                if (iterator) {
+                    let next;
+                    // iterar con límite de seguridad (ej: hasta endDate o max 500)
+                    let count = 0;
+                    while ((next = iterator.next()) && count < 730) {
+                        const nextTime = next.toJSDate().getTime();
+                        
+                        // Si la instancia EMPIEZA después de nuestro final de ventana, ya no miramos más al futuro
+                        if (nextTime > targetEndT) break; 
+                        
+                        try {
+                            const details = masterEvent.getOccurrenceDetails(next);
+                            const iterEndT = details.endDate.toJSDate().getTime();
+                            
+                            // Solo agregamos la instancia a procesar si OVERLAPS nuestra ventana de Sync
+                            // (Su final es posterior al inicio de nuestra ventana, y su inicio es anterior al final)
+                            if (iterEndT >= targetStartT && nextTime <= targetEndT) {
+                                 occurrences.push({
+                                     startDate: details.startDate,
+                                     endDate: details.endDate,
+                                     item: details.item // ICAL.Event original o exception
+                                 });
+                            }
+                        } catch (e) {
+                           console.warn("Error getting occurrence details", e);
+                        }
+                        count++;
+                    }
+                }
+            } else {
+                const startT = masterEvent.startDate.toJSDate().getTime();
+                const endT = masterEvent.endDate.toJSDate().getTime();
+                if (startT <= targetEndT && endT >= targetStartT) {
+                     occurrences.push({
+                         startDate: masterEvent.startDate,
+                         endDate: masterEvent.endDate,
+                         item: masterEvent // Evento único
+                     });
+                }
+            }
+
+            // Procesar las ocurrencias encontradas
+            for (const occ of occurrences) {
+                const evt = occ.item; 
+                let start = occ.startDate.toJSDate();
+                let end = occ.endDate.toJSDate();
                 
-                let start = event.startDate.toJSDate();
-                let end = event.endDate.toJSDate();
-                const allDay = event.startDate.isDate;
-
-                // CORRECCIÓN: Eventos de todo el día
-                // iCal protocol define DTEND como exclusivo (el día siguiente a las 00:00).
-                // Si es all-day, restamos 1 segundo para que caiga en el día correcto visualmente (23:59:59)
-                if (allDay) {
+                // Corrección para Todo el Día
+                if (isAllDay) {
                      end = new Date(end.getTime() - 1);
                 }
 
-                // PARSEO COLOR PLANMORE
-                let color = '#EA426A'; // Default fallback
-                if (event.description) {
-                    // DEBUG: Ver qué llega realmente
-                    if (event.description.includes('COLOR')) {
-                         console.log(`[DEBUG] Description for ${event.summary}:`, event.description);
-                    }
-                    
-                    const colorMatch = event.description.match(/<COLOR:(#[A-Fa-f0-9]{6})>/);
-                    if (colorMatch) {
-                        color = colorMatch[1];
-                        console.log(`[DEBUG] Color parsed: ${color}`);
-                    }
+                // PARSEO COLOR DE DESCRIPCIÓN
+                let color = '#4FACF2'; 
+                if (evt.description) {
+                    const colorMatch = evt.description.match(/<COLOR:(#[A-Fa-f0-9]{6})>/);
+                    if (colorMatch) color = colorMatch[1];
                 }
 
-                // ID COMPUESTO PARA RECURRENCIA
-                // Si es un evento recurrente expandido, el UID es el mismo para todas las instancias.
-                // Dexie necesita IDs únicos. Usamos: UID_STARTISO
-                // Verificamos si es recurrente mirando recurrenceId o si vevent tiene propiedad 'recurrence-id'
-                const recurrenceId = event.recurrenceId;
-                let finalId = event.uid || crypto.randomUUID();
-                
-                // Si tiene recurrenceId (es una excepción o instancia específica) o si viene de una expansión
-                // Generamos ID único para almacenamiento local
-                if (recurrenceId || vevent.getFirstProperty('recurrence-id')) {
-                    finalId = `${event.uid}_${start.toISOString()}`;
-                } 
-                // También si detectamos que es parte de una serie (aunque ical.js a veces no lo marca explícitamente en el objeto Event simple)
-                // Al usar <expand>, el servidor manda VEVENTs sueltos.
-                // Estrategia segura: Si ya existe ese UID en el array 'events' (procesado en este loop), es recurrencia.
-                // Pero como 'events' está vacío al principio del loop, esto no basta.
-                // Mejor: Usamos siempre composite ID si detectamos que es recurrente.
-                // Ojo: Para update/delete necesitamos el UID original. Guardamos 'originalUid'.
-                
-                // EXTRAER RRULE (FREQ y UNTIL) para UI
-                let recurrence = 'NONE';
-                let recurrenceEnd = null;
-                
-                if (event.component && event.component.hasProperty('rrule')) {
-                    const rruleProp = event.component.getFirstProperty('rrule');
-                    if (rruleProp && typeof rruleProp.getValue === 'function') {
-                        const rrule = rruleProp.getValue();
-                        // rrule es un objeto ICAL.Recur
-                        if (rrule && rrule.freq) {
-                            recurrence = rrule.freq.toString(); // "WEEKLY", "DAILY", etc.
-                            if (rrule.until) {
-                                recurrenceEnd = rrule.until.toJSDate().toISOString();
-                            }
-                        }
-                    } else {
-                         // Fallback or explicit handling if ical.js behaves unexpectedly
-                         // Sometimes rruleProp is directly the value? No, unlikely.
-                    }
+                // Generar ID
+                const recurrenceId = evt.recurrenceId;
+                let finalId = uid;
+                if (recurrenceId || masterEvent.isRecurring()) {
+                    finalId = `${uid}_${start.toISOString()}`;
                 }
 
                 events.push({
                     id: finalId,
-                    originalId: event.uid, // Para saber cuál borrar/editar en el server
-                    title: event.summary || 'Sin Título',
+                    originalId: uid, 
+                    title: evt.summary || 'Sin Título',
                     start: start.toISOString(),
                     end: end.toISOString(),
-                    description: event.description || '',
-                    allDay: allDay,
-                    location: event.location || '',
+                    description: evt.description || '',
+                    allDay: isAllDay,
+                    location: evt.location || '',
                     type: 'icloud',
                     color: color,
                     calendarUrl: calendarUrl,
+                    icsUrl: href ? (href.startsWith('http') ? href : `${this.baseUrl}${href}`) : null,
                     recurrenceId: recurrenceId ? recurrenceId.toString() : null,
                     recurrence: recurrence,
                     recurrenceEnd: recurrenceEnd
@@ -569,7 +609,7 @@ ${rruleLine}
 END:VEVENT
 END:VCALENDAR`;
 
-      const eventUrl = `${calendarUrl.replace(/\/$/, '')}/${uid}.ics`;
+      const eventUrl = eventData.icsUrl || `${calendarUrl.replace(/\/$/, '')}/${uid}.ics`;
       console.log('[iCloudService] Updating Event at:', eventUrl);
 
       // PUT SIN If-None-Match para sobrescribir
@@ -577,14 +617,14 @@ END:VCALENDAR`;
           'Content-Type': 'text/calendar; charset=utf-8'
       });
       
-      return { ...eventData, description };
+      return { ...eventData, description, icsUrl: eventUrl };
   }
 
   // 6. Borrar Evento (DELETE)
-  async deleteEvent(calendarUrl, eventId) {
-      if (!eventId) throw new Error("Evento sin ID para borrar");
+  async deleteEvent(calendarUrl, eventId, icsUrl = null) {
+      if (!eventId && !icsUrl) throw new Error("Evento sin ID o URL para borrar");
       
-      const eventUrl = `${calendarUrl.replace(/\/$/, '')}/${eventId}.ics`;
+      const eventUrl = icsUrl || `${calendarUrl.replace(/\/$/, '')}/${eventId}.ics`;
       console.log('[iCloudService] Deleting Event at:', eventUrl);
 
       await this.request('DELETE', eventUrl);
@@ -592,8 +632,8 @@ END:VCALENDAR`;
   }
 
   // 7. Excluir Instancia (Smart Delete: Solo esta)
-  async excludeInstance(calendarUrl, uid, dateToExclude) {
-      const eventUrl = `${calendarUrl.replace(/\/$/, '')}/${uid}.ics`;
+  async excludeInstance(calendarUrl, uid, dateToExclude, icsUrl = null) {
+      const eventUrl = icsUrl || `${calendarUrl.replace(/\/$/, '')}/${uid}.ics`;
       console.log('[iCloudService] Excluding instance:', dateToExclude, 'for UID:', uid);
 
       // 1. Fetch raw ICS
@@ -625,8 +665,8 @@ END:VCALENDAR`;
   }
 
   // 8. Truncar Serie (Smart Delete: Esta y futuras)
-  async truncateSeries(calendarUrl, uid, lastValidDate) {
-      const eventUrl = `${calendarUrl.replace(/\/$/, '')}/${uid}.ics`;
+  async truncateSeries(calendarUrl, uid, lastValidDate, icsUrl = null) {
+      const eventUrl = icsUrl || `${calendarUrl.replace(/\/$/, '')}/${uid}.ics`;
       console.log('[iCloudService] Truncating series at:', lastValidDate, 'for UID:', uid);
       
       // 1. Fetch raw

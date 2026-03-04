@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 
 const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText = 'Borrar', cancelText = 'Cancelar', confirmColor = 'bg-red-500 hover:bg-red-600', isWelcome = false, showRecurringOptions = false }) => {
   const [deleteScope, setDeleteScope] = React.useState('SINGLE'); // 'SINGLE' or 'FUTURE'
@@ -10,9 +11,9 @@ const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText 
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     // Overlay con z-index muy alto
-    <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/20 backdrop-blur-[2px] animate-fadeIn">
+    <div className="fixed inset-0 z-[999999] flex items-center justify-center bg-black/20 backdrop-blur-[2px] animate-fadeIn">
       
       {/* Caja de la alerta */}
       <div className={`
@@ -55,7 +56,7 @@ const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText 
           
           <button
             onClick={() => {
-              onConfirm(deleteScope);
+              onConfirm(showRecurringOptions ? deleteScope : 'ALL');
               onClose();
             }}
             className={`
@@ -67,7 +68,8 @@ const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText 
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

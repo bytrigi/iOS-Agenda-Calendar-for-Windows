@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../db/database';
 import { Search, Calendar, CheckCircle, StickyNote, X, ArrowRight } from 'lucide-react';
 import { format } from 'date-fns';
@@ -7,7 +7,21 @@ import { es } from 'date-fns/locale';
 const GlobalSearch = ({ isOpen, onClose, onNavigate }) => {
     const [query, setQuery] = useState('');
     const [results, setResults] = useState({ events: [], tasks: [], notes: [] });
+    const [selectedIndex, setSelectedIndex] = useState(-1);
     const inputRef = useRef(null);
+    const scrollContainerRef = useRef(null);
+
+    const flatResults = useMemo(() => {
+        return [
+            ...results.events.map(e => ({ type: 'event', item: e })),
+            ...results.tasks.map(t => ({ type: 'task', item: t })),
+            ...results.notes.map(n => ({ type: 'note', item: n }))
+        ];
+    }, [results]);
+
+    useEffect(() => {
+        setSelectedIndex(-1);
+    }, [query]);
 
     // Enfocar el input siempre que se abra
     useEffect(() => {
@@ -48,18 +62,47 @@ const GlobalSearch = ({ isOpen, onClose, onNavigate }) => {
         return () => clearTimeout(timeoutId);
     }, [query]);
 
-    // Cerrar con tecla Escape
+    // Cerrar con tecla Escape y navegación con flechas
     useEffect(() => {
         const handleKeyDown = (e) => {
-            if (e.key === 'Escape' && isOpen) onClose();
+            if (!isOpen) return;
+            
+            if (e.key === 'Escape') onClose();
+            else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setSelectedIndex(prev => (prev < flatResults.length - 1 ? prev + 1 : prev));
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setSelectedIndex(prev => (prev > 0 ? prev - 1 : prev));
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (selectedIndex >= 0 && selectedIndex < flatResults.length) {
+                    const selected = flatResults[selectedIndex];
+                    onNavigate(selected.type, selected.item);
+                } else if (flatResults.length > 0) {
+                    onNavigate(flatResults[0].type, flatResults[0].item);
+                }
+            }
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isOpen, onClose]);
+    }, [isOpen, onClose, flatResults, selectedIndex, onNavigate]);
+
+    // Scroll automático al elemento seleccionado
+    useEffect(() => {
+        if (selectedIndex >= 0 && scrollContainerRef.current) {
+            const container = scrollContainerRef.current;
+            const element = container.querySelector(`[data-index="${selectedIndex}"]`);
+            if (element) {
+                element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+        }
+    }, [selectedIndex]);
 
     if (!isOpen) return null;
 
-    const hasResults = results.events.length > 0 || results.tasks.length > 0 || results.notes.length > 0;
+    const hasResults = flatResults.length > 0;
+    let globalItemIndex = 0;
 
     return (
         <div className="fixed inset-0 z-[200] flex items-start justify-center pt-[15vh] bg-black/20 dark:bg-black/40 backdrop-blur-sm animate-fadeIn">
@@ -84,7 +127,7 @@ const GlobalSearch = ({ isOpen, onClose, onNavigate }) => {
                 </div>
 
                 {/* RESULTADOS */}
-                <div className="max-h-[60vh] overflow-y-auto custom-scrollbar">
+                <div ref={scrollContainerRef} className="max-h-[60vh] overflow-y-auto custom-scrollbar">
                     
                     {!hasResults && query && (
                         <div className="p-10 text-center text-gray-400 dark:text-gray-500">
@@ -102,11 +145,16 @@ const GlobalSearch = ({ isOpen, onClose, onNavigate }) => {
                     {results.events.length > 0 && (
                         <div className="p-2">
                             <h3 className="px-4 py-2 text-xs font-bold text-gray-400 dark:text-gray-600 uppercase tracking-widest">Calendario</h3>
-                            {results.events.map(event => (
+                            {results.events.map(event => {
+                                const index = globalItemIndex++;
+                                const isActive = index === selectedIndex;
+                                return (
                                 <button 
                                     key={event.id}
+                                    data-index={index}
                                     onClick={() => onNavigate('event', event)}
-                                    className="w-full flex items-center gap-4 p-3 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-xl transition-colors group text-left"
+                                    onMouseEnter={() => setSelectedIndex(index)}
+                                    className={`w-full flex items-center gap-4 p-3 rounded-xl transition-colors group text-left ${isActive ? 'bg-blue-50 dark:bg-blue-900/30 ring-1 ring-blue-200 dark:ring-blue-700' : 'hover:bg-blue-50/50 dark:hover:bg-blue-900/10'}`}
                                 >
                                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${event.color || 'bg-blue-100 dark:bg-blue-900/50'} text-gray-700 dark:text-gray-200`}>
                                         <Calendar size={20} />
@@ -117,9 +165,9 @@ const GlobalSearch = ({ isOpen, onClose, onNavigate }) => {
                                             {format(new Date(event.start), "d 'de' MMMM, HH:mm", { locale: es })}
                                         </p>
                                     </div>
-                                    <ArrowRight size={16} className="text-gray-300 dark:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                    <ArrowRight size={16} className={`text-gray-300 dark:text-gray-600 transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
                                 </button>
-                            ))}
+                            )})}
                         </div>
                     )}
 
@@ -127,11 +175,16 @@ const GlobalSearch = ({ isOpen, onClose, onNavigate }) => {
                     {results.tasks.length > 0 && (
                         <div className="p-2 border-t border-gray-50 dark:border-slate-800">
                             <h3 className="px-4 py-2 text-xs font-bold text-gray-400 dark:text-gray-600 uppercase tracking-widest">Tareas</h3>
-                            {results.tasks.map(task => (
+                            {results.tasks.map(task => {
+                                const index = globalItemIndex++;
+                                const isActive = index === selectedIndex;
+                                return (
                                 <button 
                                     key={task.id}
+                                    data-index={index}
                                     onClick={() => onNavigate('task', task)}
-                                    className="w-full flex items-center gap-4 p-3 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-xl transition-colors group text-left"
+                                    onMouseEnter={() => setSelectedIndex(index)}
+                                    className={`w-full flex items-center gap-4 p-3 rounded-xl transition-colors group text-left ${isActive ? 'bg-green-50 dark:bg-green-900/30 ring-1 ring-green-200 dark:ring-green-700' : 'hover:bg-green-50/50 dark:hover:bg-green-900/10'}`}
                                 >
                                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${task.completed ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-400' : 'bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-gray-400'}`}>
                                         <CheckCircle size={20} />
@@ -142,9 +195,9 @@ const GlobalSearch = ({ isOpen, onClose, onNavigate }) => {
                                             {task.completed ? 'Completada' : 'Pendiente'}
                                         </p>
                                     </div>
-                                    <ArrowRight size={16} className="text-gray-300 dark:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                    <ArrowRight size={16} className={`text-gray-300 dark:text-gray-600 transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
                                 </button>
-                            ))}
+                            )})}
                         </div>
                     )}
 
@@ -152,11 +205,16 @@ const GlobalSearch = ({ isOpen, onClose, onNavigate }) => {
                     {results.notes.length > 0 && (
                         <div className="p-2 border-t border-gray-50 dark:border-slate-800">
                             <h3 className="px-4 py-2 text-xs font-bold text-gray-400 dark:text-gray-600 uppercase tracking-widest">Notas</h3>
-                            {results.notes.map(note => (
+                            {results.notes.map(note => {
+                                const index = globalItemIndex++;
+                                const isActive = index === selectedIndex;
+                                return (
                                 <button 
                                     key={note.id}
+                                    data-index={index}
                                     onClick={() => onNavigate('note', note)}
-                                    className="w-full flex items-center gap-4 p-3 hover:bg-yellow-50 dark:hover:bg-yellow-900/30 rounded-xl transition-colors group text-left"
+                                    onMouseEnter={() => setSelectedIndex(index)}
+                                    className={`w-full flex items-center gap-4 p-3 rounded-xl transition-colors group text-left ${isActive ? 'bg-yellow-50 dark:bg-yellow-900/30 ring-1 ring-yellow-200 dark:ring-yellow-700' : 'hover:bg-yellow-50/50 dark:hover:bg-yellow-900/10'}`}
                                 >
                                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${note.color.split(' ')[0] || 'bg-yellow-100'} ${note.color.split(' ')[1] || 'dark:bg-yellow-900/50'} text-gray-700 dark:text-gray-200 shadow-sm`}>
                                         <StickyNote size={20} />
@@ -165,9 +223,9 @@ const GlobalSearch = ({ isOpen, onClose, onNavigate }) => {
                                         <p className="font-bold text-gray-800 dark:text-gray-200 truncate">{note.title}</p>
                                         <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{note.content || 'Sin contenido'}</p>
                                     </div>
-                                    <ArrowRight size={16} className="text-gray-300 dark:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                    <ArrowRight size={16} className={`text-gray-300 dark:text-gray-600 transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
                                 </button>
-                            ))}
+                            )})}
                         </div>
                     )}
                 </div>

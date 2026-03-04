@@ -1,6 +1,9 @@
 {
   "name": "ios-calendar-for-windows",
   "private": true,
+  "author": {
+    "name": "Adrián"
+  },
   "version": "1.0.0",
   "type": "module",
   "scripts": {
@@ -51,7 +54,8 @@
   "main": "dist-electron/main.js",
   "build": {
     "appId": "com.ioscalendar.windows",
-    "productName": "iOS Calendar for Windows 📅",
+    "productName": "iOS Calendar for Windows",
+    "copyright": "Copyright © 2026 Adrián",
     "mac": {
        "target": ["default"]
     },

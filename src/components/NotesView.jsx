@@ -17,16 +17,17 @@ const NotesView = () => {
     // CAMPOS FORMULARIO
     const [title, setTitle] = useState('');
     const [content, setContent] = useState('');
-    const [color, setColor] = useState('bg-yellow-100');
+    const [color, setColor] = useState('bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-gray-100');
     const [isPinned, setIsPinned] = useState(false);
 
     // COLORES DISPONIBLES
     const colors = [
-        { id: 'yellow', class: 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-100' },
-        { id: 'blue',   class: 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-100' },
-        { id: 'pink',   class: 'bg-pink-100 dark:bg-pink-900/40 text-pink-800 dark:text-pink-100' },
-        { id: 'green',  class: 'bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-100' },
-        { id: 'purple', class: 'bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-100' },
+        { id: 'neutral', class: 'bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-gray-100' },
+        { id: 'yellow', class: 'bg-yellow-100 dark:bg-yellow-900 text-yellow-900 dark:text-yellow-100' },
+        { id: 'blue',   class: 'bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-blue-100' },
+        { id: 'pink',   class: 'bg-pink-100 dark:bg-pink-900 text-pink-900 dark:text-pink-100' },
+        { id: 'green',  class: 'bg-green-100 dark:bg-green-900 text-green-900 dark:text-green-100' },
+        { id: 'purple', class: 'bg-purple-100 dark:bg-purple-900 text-purple-900 dark:text-purple-100' },
     ];
 
     // 1. CARGAR NOTAS
@@ -45,7 +46,7 @@ const NotesView = () => {
         setEditingNote(null);
         setTitle('');
         setContent('');
-        setColor('bg-yellow-100');
+        setColor('bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-gray-100');
         setIsPinned(false);
         setIsModalOpen(true);
     };
@@ -167,7 +168,7 @@ const NotesView = () => {
                     />
 
                     <div 
-                        className={`w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col h-[80vh] ${color}`}
+                        className={`w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col h-[80vh] ${color.replace('/95', '').replace('/80', '')}`}
                         style={{ transform: 'translate3d(0,0,0)', backfaceVisibility: 'hidden' }}
                     >
                         
@@ -211,15 +212,15 @@ const NotesView = () => {
                             
                             <input 
                                 type="text" 
-                                placeholder="Título"
-                                className="bg-transparent text-3xl font-bold placeholder-black/20 dark:placeholder-white/20 border-none outline-none w-full select-text flex-shrink-0 pt-0 pb-3 leading-normal"
+                                placeholder="Título de la nota"
+                                className="bg-transparent text-3xl font-bold placeholder-gray-500/50 dark:placeholder-gray-400/50 border-none outline-none w-full select-text flex-shrink-0 pt-0 pb-3 leading-normal"
                                 value={title}
                                 onChange={(e) => setTitle(e.target.value)}
                             />
                             
                             <textarea 
                                 placeholder="Escribe aquí tus ideas..." 
-                                className="bg-transparent text-lg opacity-90 placeholder-black/20 dark:placeholder-white/20 border-none outline-none w-full flex-1 resize-none select-text leading-relaxed overflow-y-auto pr-2"
+                                className="bg-transparent text-lg opacity-90 placeholder-gray-500/50 dark:placeholder-gray-400/50 border-none outline-none w-full flex-1 resize-none select-text leading-relaxed overflow-y-auto pr-2 custom-scrollbar"
                                 value={content}
                                 spellCheck="false" 
                                 onChange={(e) => setContent(e.target.value)}
