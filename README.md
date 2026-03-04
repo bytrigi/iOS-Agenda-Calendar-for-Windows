@@ -4,14 +4,33 @@ Una aplicación de escritorio moderna que trae la experiencia estética y funcio
 
 ## ✨ Características Principales
 
-- **Vistas de Calendario Completas:** Navega fluidamente entre vistas de Día, Semana, Mes y Año.
-- **Gestión Integrada de Tareas:** Crea tareas y subtareas con seguimiento de progreso, y márcalas como completadas con un solo clic.
-- **Bloc de Notas Estilo Post-it:** Crea notas con códigos de colores, fíjalas (pin) en la parte superior y realiza búsquedas en su contenido.
-- **Sincronización con iCloud (CalDAV):** Conecta tu Apple ID usando una Contraseña de Aplicación para sincronizar eventos bidireccionalmente. Soporta la inyección de colores personalizados mediante etiquetas `<COLOR:#HEX>` en la descripción de iCloud.
-- **Buscador Global (Omnibar):** Presiona **`Ctrl + K`** (o `Cmd + K`) para abrir la búsqueda global y encontrar al instante eventos, tareas o notas.
-- **Navegación por Gestos:** Soporte para cambio de páginas mediante scroll, gestos de touchpad o deslizamiento táctil (swipe).
+**☁️ Sincronización Total con iCloud (CalDAV)**
+
+- **Conexión Bidireccional:** Inicia sesión de forma segura (con Contraseña de Aplicación) para ver, crear, editar y eliminar eventos directamente en tus servidores de Apple.
+- **Smart Sync:** Se sincroniza en segundo plano de forma inteligente (_Fetch on Focus_) al volver a la ventana, con protección contra saturación de red.
+- **Gestión de Recurrencias:** Soporte avanzado para borrar o editar una única instancia de un evento repetitivo o la serie completa.
+- **Apple Reminders:** Sincronización integrada de tus recordatorios de iOS (soporte VTODO).
+- **Colores Personalizados:** Soporta la inyección de colores personalizados mediante etiquetas `<COLOR:#HEX>` en la descripción de iCloud.
+
+**🎨 Interfaz iOS Premium & Vistas de Calendario**
+
+- **Estética Apple:** Diseño _Glassmorphism_, modo oscuro/claro dinámico y barra de título personalizada (sin bordes nativos de Windows) con controles estilo Mac.
+- **4 Vistas Interactivas:** - _Año:_ Cuadrícula térmica con salto rápido.
+  - _Mes:_ Eventos continuos en formato "píldora".
+  - _Semana & Día:_ Líneas de tiempo precisas con cálculo inteligente de solapamientos visuales.
+- **Selectores iOS:** Tambores giratorios (_TimeSelector_) recreados desde cero para elegir horas y minutos al más puro estilo iPhone.
+- **Navegación Fluida:** Soporte nativo para cambio de páginas mediante scroll, gestos de touchpad, deslizamiento táctil (_swipe_) y atajos de teclado.
+
+**✅ Productividad: Tareas y Notas**
+
+- **Gestor de Tareas Avanzado:** Crea tareas padre e infinitas subtareas desplegables con seguimiento de progreso. Limpia las tareas completadas con un solo clic.
+- **Notas (Post-its):** Tablón de notas personalizables por color. Soporte para fijar notas importantes (_Pin_) en la parte superior.
 - **Notificaciones de Escritorio:** Alertas nativas del sistema que te avisan antes de que comience un evento, según los recordatorios configurados.
-- **UI/UX Nativa de Apple:** Diseño meticuloso usando Tailwind CSS que emula la interfaz de iOS/macOS, incluyendo la clásica barra de título personalizada con controles estilo Mac (botones rojo, amarillo y verde).
+
+**🔍 Búsqueda Global y Arquitectura**
+
+- **Spotlight para Windows (Omnibar):** Presiona **`Ctrl + K`** (o `Cmd + K`) para abrir el buscador global interactivo y encontrar al instante eventos, tareas o notas.
+- **Offline-First:** Construida sobre _Dexie.js_ (IndexedDB). Si te quedas sin internet, la app sigue funcionando al 100%. Tus datos locales siempre están seguros.
 
 ## 🛠️ Stack Tecnológico
 
